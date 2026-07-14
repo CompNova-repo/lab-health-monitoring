@@ -1,0 +1,39 @@
+machines:
+  gcp_testing:
+    thresholds:
+      ram: 90
+      disk: 85
+      cpu: 95
+      error_count: 50
+      warning_count: 200
+    package_checks:
+      - sshd
+    apps: []
+    packages:
+      - openssh-server
+    network_checks:
+      - target: 8.8.8.8
+        type: ping
+    top_n: 5
+    disk_device: sda
+    network_interface: eth0
+  gcp_mid:
+    thresholds:
+      ram: 90
+      disk: 85
+      cpu: 95
+      error_count: 50
+      warning_count: 200
+    package_checks:
+      - sshd
+    apps: []
+    packages:
+      - openssh-server
+    network_checks:
+      - target: 8.8.8.8
+        type: ping
+    top_n: 5
+    disk_device: sda
+    network_interface: eth0
+settings:
+  consecutive_threshold_breaches: 2

@@ -1,0 +1,44 @@
+metrics:
+  inode_usage_percentage:
+    display_name: "Inode Usage Percentage"
+    column_name: "inode_usage_percentage"
+    db_type: "DOUBLE PRECISION"
+    unit: "%"
+    script: "new-metrics/inode_usage_percentage.py"
+    command: "df -Pi / | awk 'NR==2 {gsub(/%/, \"\", $5); print $5}'"
+    parser: "first_float"
+    timeout_seconds: 15
+    enabled: true
+
+  cpu_iowait_percentage:
+    display_name: "CPU I/O Wait Percentage"
+    column_name: "cpu_iowait_percentage"
+    db_type: "DOUBLE PRECISION"
+    unit: "%"
+    script: "new-metrics/cpu_iowait_percentage.py"
+    command: "top -bn1 | awk '/Cpu\\(s\\)/ {gsub(/,/, \"\"); for(i=1;i<=NF;i++) if ($i ~ /wa/) print $(i-1)}'"
+    parser: "first_float"
+    timeout_seconds: 15
+    enabled: true
+
+  established_connections:
+    display_name: Established Connections
+    column_name: "established_connections"
+    db_type: "INTEGER"
+    unit: count
+    script: "new-metrics/established_connections.py"
+    command: ss -t state established | wc -l
+    parser: "first_float"
+    timeout_seconds: 15
+    enabled: true
+
+  time_wait_connections:
+    display_name: TIME_WAIT Connections
+    column_name: "time_wait_connections"
+    db_type: "INTEGER"
+    unit: count
+    script: "new-metrics/time_wait_connections.py"
+    command: ss -t state time-wait | wc -l
+    parser: "first_float"
+    timeout_seconds: 15
+    enabled: true
