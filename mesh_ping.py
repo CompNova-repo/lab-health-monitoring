@@ -127,7 +127,8 @@ async def run_mesh_ping(machine: Machine, target_machines: List[Machine], sem: a
                 ip_to_machine = {m.ip_address: m for m in target_machines}
                 
                 # Parse stdout results
-                for line in proc.stdout.strip().split('\n'):
+                stdout = (proc.stdout or '')
+                for line in stdout.strip().split('\n'):
                     if not line:
                         continue
                     parts = line.split()
@@ -162,8 +163,8 @@ async def run_mesh_ping(machine: Machine, target_machines: List[Machine], sem: a
                     else:
                         logger.warning(f"Could not match IP {ip} to a known target machine in DB.")
                             
-        except Exception as e:
-            logger.error(f"Failed to process {machine.alias} ({machine.ip_address}): {e}")
+        except Exception:
+            logger.exception(f"Failed to process {machine.alias} ({machine.ip_address})")
             
         return results
 
@@ -207,15 +208,27 @@ async def execute_mesh_ping_test(db_dsn: Optional[str] = None, max_concurrent_ss
     if unreachable_machines:
         logger.warning(f"{len(unreachable_machines)} machines are unreachable from controller: {[m.alias for m in unreachable_machines]}")
         
-    if not reachable_machines:
-        logger.error("No reachable machines found. Aborting execution.")
+    # Filter out machines with missing SSH credentials — these would crash asyncssh
+    credentialed_machines = [
+        m for m in reachable_machines
+        if m.ssh_user and m.ssh_key_path
+    ]
+    skipped_no_creds = [
+        m.alias for m in reachable_machines
+        if not m.ssh_user or not m.ssh_key_path
+    ]
+    if skipped_no_creds:
+        logger.warning(f"{len(skipped_no_creds)} reachable machines skipped (missing SSH credentials): {skipped_no_creds}")
+    
+    if not credentialed_machines:
+        logger.error("No reachable machines with valid SSH credentials found. Aborting execution.")
         return []
         
-    logger.info(f"{len(reachable_machines)} machines are reachable. Initiating mesh ping...")
+    logger.info(f"{len(credentialed_machines)} machines are reachable with valid credentials. Initiating mesh ping...")
     
     # Step 2: Run pings with a concurrency limit to prevent controller/network saturation
     sem = asyncio.Semaphore(max_concurrent_ssh)
-    ping_tasks = [run_mesh_ping(m, reachable_machines, sem) for m in reachable_machines]
+    ping_tasks = [run_mesh_ping(m, credentialed_machines, sem) for m in credentialed_machines]
     
     all_results_nested = await asyncio.gather(*ping_tasks)
     
