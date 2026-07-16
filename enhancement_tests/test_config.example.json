@@ -11,6 +11,11 @@
     "ssh_timeout_seconds": 10,
     "results_directory": "./test-results"
   },
+  "cleanup": {
+    "enabled": true,
+    "before_run": true,
+    "after_run": false
+  },
   "commands": {
     "add_machine": [
       "python3",
@@ -43,13 +48,13 @@
   },
   "apps_json": {
     "path": "<PATH_TO_MONITORED_APPS_JSON>",
-    "list_path": "applications",
+    "list_path": "apps",
     "name_key": "app_name",
     "command_key": "command"
   },
   "fixtures": {
     "machine": {
-      "alias": "e2e-machine-{run_short}",
+      "alias": "e2e_machine_{run_short}",
       "hostname": "<EXPECTED_HOSTNAME_OR_EMPTY>",
       "ip_address": "<REACHABLE_MACHINE_IP>",
       "ssh_port": 22,
@@ -73,10 +78,10 @@
       "enabled": true
     },
     "app": {
-      "app_name": "sshd",
-      "display_name": "SSH daemon",
+      "app_name": "e2e_sshd_{run_short}",
+      "display_name": "E2E SSHD {run_short}",
       "command": "pgrep -x sshd >/dev/null && echo running || echo stopped",
-      "target_machine_alias": "e2e-machine-{run_short}"
+      "target_machine_alias": "e2e_machine_{run_short}"
     }
   }
 }

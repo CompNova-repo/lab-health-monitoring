@@ -2,12 +2,12 @@
 
 This harness tests the three completed enhancements as one dependent workflow:
 
-1. Add a reachable machine.
+1. Prove the per-run machine alias is absent, then add a reachable machine.
 2. Run `p1_fixed.py` and verify a new `metric_samples` row for that machine.
-3. Add a metric and verify its `metric_registry` row.
+3. Prove the per-run metric key/column are absent, then add a metric and verify its `metric_registry` row.
 4. Execute the registered metric command over SSH.
 5. Run `p1_fixed.py` and verify the new `metric_samples` column and a non-null value.
-6. Add an application and verify its monitoring command in JSON.
+6. Prove the per-run app name is absent in JSON and `app_metric_samples`, then add the application and verify its monitoring command in JSON.
 7. Execute the stored application command over SSH.
 8. Run `p1_fixed.py` and verify a new `app_metric_samples` row.
 
@@ -73,6 +73,20 @@ Set the actual apps JSON layout through:
 ```
 
 For a top-level JSON array, set `list_path` to an empty string.
+
+The checked-in config also supports optional cleanup for the test database only:
+
+```json
+"cleanup": {
+  "enabled": true,
+  "before_run": true,
+  "after_run": false
+}
+```
+
+Cleanup only removes test-only artifacts whose names begin with `e2e_`, including
+dynamic `metric_samples` columns, and runs only after the existing test-database
+safety check passes.
 
 ## Run
 

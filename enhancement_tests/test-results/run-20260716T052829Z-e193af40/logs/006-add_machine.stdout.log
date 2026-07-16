@@ -1,0 +1,17 @@
+Machine YAML written:
+/home/vagrant/.hermes/skills/add-new-machine/pending/new_machine.yaml
+alias: e2e_machine_e193af40
+ip_address: 35.238.107.235
+monitoring_enabled: true
+ssh_key_path: /home/vagrant/.ssh/id_ed25519
+ssh_port: 22
+ssh_user: pulkit-centos
+tags:
+- e2e
+
+============================================================
+Step 1: Validating machine (SSH)...
+FAILURE: SSH validation failed.
+SSH validation failed.
+ssh: connect to host 35.238.107.235 port 22: Connection timed out
+

@@ -1,0 +1,39 @@
+{
+  "status": "success",
+  "test_mode": "local",
+  "host_tested": null,
+  "test_results": {
+    "cpu_pct": "0.00",
+    "rss_memory_mb": "39.77",
+    "process_count": "5",
+    "thread_count": "5",
+    "listening_sockets": "0",
+    "status": "running"
+  },
+  "registry_file": "/home/vagrant/.hermes/skills/add-new-apps/app_commands.json",
+  "entry": {
+    "app_name": "e2e_sshd_6826d80f",
+    "display_name": "E2E SSHD 6826d80f",
+    "service_name": "ssh",
+    "process_pattern": "sshd",
+    "enabled": true,
+    "created_or_updated_at": "2026-07-16T05:36:27.766693+00:00",
+    "commands": {
+      "process_count": "pids=$(ps -eo pid=,ppid=,comm=,args= | awk -v pat=sshd -v self=$$ -v parent=$PPID '$1 != self && $1 != parent && $2 != self && $2 != parent && ($3 ~ pat || $0 ~ pat) && $3 !~ /^(awk|grep|pgrep|ps|ss|bash|sh|timeout)$/ {print $1}'); if [ -z \"$pids\" ]; then echo 0; else echo \"$pids\" | wc -l | awk '{print $1+0}'; fi",
+      "cpu_pct": "pids=$(ps -eo pid=,ppid=,comm=,args= | awk -v pat=sshd -v self=$$ -v parent=$PPID '$1 != self && $1 != parent && $2 != self && $2 != parent && ($3 ~ pat || $0 ~ pat) && $3 !~ /^(awk|grep|pgrep|ps|ss|bash|sh|timeout)$/ {print $1}' | paste -sd, -); if [ -z \"$pids\" ]; then echo 0.00; else ps -o %cpu= -p \"$pids\" 2>/dev/null | awk '{s+=$1} END{printf \"%.2f\\n\", s+0}'; fi",
+      "rss_memory_mb": "pids=$(ps -eo pid=,ppid=,comm=,args= | awk -v pat=sshd -v self=$$ -v parent=$PPID '$1 != self && $1 != parent && $2 != self && $2 != parent && ($3 ~ pat || $0 ~ pat) && $3 !~ /^(awk|grep|pgrep|ps|ss|bash|sh|timeout)$/ {print $1}' | paste -sd, -); if [ -z \"$pids\" ]; then echo 0.00; else ps -o rss= -p \"$pids\" 2>/dev/null | awk '{s+=$1} END{printf \"%.2f\\n\", s/1024}'; fi",
+      "thread_count": "pids=$(ps -eo pid=,ppid=,comm=,args= | awk -v pat=sshd -v self=$$ -v parent=$PPID '$1 != self && $1 != parent && $2 != self && $2 != parent && ($3 ~ pat || $0 ~ pat) && $3 !~ /^(awk|grep|pgrep|ps|ss|bash|sh|timeout)$/ {print $1}' | paste -sd, -); if [ -z \"$pids\" ]; then echo 0; else ps -o nlwp= -p \"$pids\" 2>/dev/null | awk '{s+=$1} END{print s+0}'; fi",
+      "listening_sockets": "pid_re=$(ps -eo pid=,ppid=,comm=,args= | awk -v pat=sshd -v self=$$ -v parent=$PPID '$1 != self && $1 != parent && $2 != self && $2 != parent && ($3 ~ pat || $0 ~ pat) && $3 !~ /^(awk|grep|pgrep|ps|ss|bash|sh|timeout)$/ {print $1}' | paste -sd'|' -); if [ -z \"$pid_re\" ]; then echo 0; else ss -lntup 2>/dev/null | grep -E \"pid=($pid_re),\" | wc -l | awk '{print $1+0}'; fi",
+      "status": "state=$(systemctl is-active ssh 2>/dev/null || true); if [ \"$state\" = active ]; then echo running; elif [ \"$state\" = activating ] || [ \"$state\" = reloading ]; then echo restarting; elif [ -n \"$(ps -eo pid=,ppid=,comm=,args= | awk -v pat=sshd -v self=$$ -v parent=$PPID '$1 != self && $1 != parent && $2 != self && $2 != parent && ($3 ~ pat || $0 ~ pat) && $3 !~ /^(awk|grep|pgrep|ps|ss|bash|sh|timeout)$/ {print $1}')\" ]; then echo running; elif [ \"$state\" = failed ]; then echo error; else echo stopped; fi"
+    },
+    "command": "state=$(systemctl is-active ssh 2>/dev/null || true); if [ \"$state\" = active ]; then echo running; elif [ \"$state\" = activating ] || [ \"$state\" = reloading ]; then echo restarting; elif [ -n \"$(ps -eo pid=,ppid=,comm=,args= | awk -v pat=sshd -v self=$$ -v parent=$PPID '$1 != self && $1 != parent && $2 != self && $2 != parent && ($3 ~ pat || $0 ~ pat) && $3 !~ /^(awk|grep|pgrep|ps|ss|bash|sh|timeout)$/ {print $1}')\" ]; then echo running; elif [ \"$state\" = failed ]; then echo error; else echo stopped; fi",
+    "last_test_outputs": {
+      "cpu_pct": "0.00",
+      "rss_memory_mb": "39.77",
+      "process_count": "5",
+      "thread_count": "5",
+      "listening_sockets": "0",
+      "status": "running"
+    }
+  }
+}

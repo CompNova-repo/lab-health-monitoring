@@ -1,0 +1,6 @@
+{
+  "app_name": "e2e_sshd_6826d80f",
+  "command": "pgrep -x sshd >/dev/null && echo running || echo stopped",
+  "display_name": "E2E SSHD 6826d80f",
+  "target_machine_alias": "e2e_machine_6826d80f"
+}

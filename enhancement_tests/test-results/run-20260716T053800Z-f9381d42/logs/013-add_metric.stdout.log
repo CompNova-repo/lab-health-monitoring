@@ -1,0 +1,4 @@
+{
+  "status": "error",
+  "error": "Command validation failed on all 6 machine(s): gcp_testing: SSH returned non-zero or failed (ssh: connect to host 34.60.105.250 port 22: Connection refused); gcp_latest: SSH returned non-zero or failed (ssh: connect to host 34.60.146.206 port 22: Connection timed out); gcp_e32: SSH returned non-zero or failed (ssh: connect to host 35.238.107.235 port 22: Connection timed out); gcp_14_july_2: SSH returned non-zero or failed (ssh: connect to host 34.61.197.119 port 22: Connection timed out); gcp_14_july: SSH returned non-zero or failed (ssh: connect to host 136.119.216.181 port 22: Connection timed out) (... and 1 more)"
+}

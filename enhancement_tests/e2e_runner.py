@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import copy
+import hashlib
 import json
 import os
 import re
@@ -22,7 +23,7 @@ import traceback
 import uuid
 from decimal import Decimal
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping, Sequence
 
@@ -40,6 +41,7 @@ except ImportError as exc:  # pragma: no cover
 PASS = "passed"
 FAIL = "failed"
 SKIP = "skipped"
+APP_PARSER_SAFE_VALUES = {"running", "stopped", "ok", "error", "restarting"}
 
 
 def utc_now() -> datetime:
@@ -106,6 +108,24 @@ def nested_get(data: Any, dotted_path: str) -> Any:
     return current
 
 
+def nested_set(data: Any, dotted_path: str, value: Any) -> Any:
+    if not dotted_path:
+        return value
+    current = data
+    parts = dotted_path.split(".")
+    for part in parts[:-1]:
+        if isinstance(current, list):
+            current = current[int(part)]
+        else:
+            current = current[part]
+    last = parts[-1]
+    if isinstance(current, list):
+        current[int(last)] = value
+    else:
+        current[last] = value
+    return data
+
+
 @dataclass
 class CommandResult:
     argv: list[str]
@@ -165,6 +185,22 @@ class Runner:
         self.continue_after_failure = bool(
             self.execution.get("continue_after_failure", True)
         )
+        cleanup_cfg = self.config.get("cleanup", {})
+        self.cleanup_enabled = bool(cleanup_cfg.get("enabled", False))
+        self.cleanup_before_run = self.cleanup_enabled and bool(
+            cleanup_cfg.get("before_run", False)
+        )
+        self.cleanup_after_run = self.cleanup_enabled and bool(
+            cleanup_cfg.get("after_run", False)
+        )
+        validation_cfg = self.config.get("validation", {})
+        self.clock_skew_tolerance_seconds = max(
+            0, int(validation_cfg.get("clock_skew_tolerance_seconds", 0))
+        )
+        self.clock_skew_tolerance = timedelta(
+            seconds=self.clock_skew_tolerance_seconds
+        )
+        self.runtime_state: dict[str, Any] = {}
         self.audit_in_database = bool(db_cfg.get("audit_in_database", True))
         self.conn = psycopg2.connect(self.database_dsn)
         self.conn.autocommit = True
@@ -229,6 +265,306 @@ class Runner:
         if not rows:
             return None
         return next(iter(rows[0].values()))
+
+    def machine_alias(self) -> str:
+        return str(self.config["fixtures"]["machine"]["alias"])
+
+    def metric_key(self) -> str:
+        return str(self.config["fixtures"]["metric"]["metric_key"])
+
+    def metric_column_name(self) -> str:
+        metric = self.config["fixtures"]["metric"]
+        return str(metric.get("db_column") or metric.get("column_name"))
+
+    def app_name(self) -> str:
+        return str(self.config["fixtures"]["app"]["app_name"])
+
+    def effective_since(self, since: datetime) -> datetime:
+        return since - self.clock_skew_tolerance
+
+    def metric_column_rows(self, column_name: str | None = None) -> list[dict[str, Any]]:
+        return self.query(
+            """
+            SELECT column_name, data_type, udt_name
+              FROM information_schema.columns
+             WHERE table_schema = 'public'
+               AND table_name = 'metric_samples'
+               AND column_name = %s
+            """,
+            (column_name or self.metric_column_name(),),
+        )
+
+    def app_samples_for_name(
+        self,
+        app_name: str | None = None,
+        *,
+        since: datetime | None = None,
+        server_id: Any = None,
+        limit: int = 5,
+    ) -> list[dict[str, Any]]:
+        clauses = ["app_name = %s"]
+        params: list[Any] = [app_name or self.app_name()]
+        if server_id is not None:
+            clauses.append("server_id = %s")
+            params.append(server_id)
+        if since is not None:
+            clauses.append("ts >= %s")
+            params.append(self.effective_since(since))
+        params.append(limit)
+        return self.query(
+            f"""
+            SELECT id, server_id, ts, app_name, display_name, status,
+                   cpu_pct, rss_memory_mb, process_count, thread_count,
+                   listening_sockets
+              FROM public.app_metric_samples
+             WHERE {' AND '.join(clauses)}
+             ORDER BY ts DESC
+             LIMIT %s
+            """,
+            params,
+        )
+
+    def load_apps_json_payload(self) -> tuple[Path, Any, Any]:
+        app_cfg = self.config.get("apps_json", {})
+        path = Path(app_cfg["path"])
+        data = json.loads(path.read_text(encoding="utf-8"))
+        records = nested_get(data, app_cfg.get("list_path", ""))
+        if not isinstance(records, (list, Mapping)):
+            raise TypeError("apps_json.list_path must resolve to a list or object")
+        return path, data, records
+
+    def app_json_snapshot(self, expected_name: str | None = None) -> dict[str, Any]:
+        app_cfg = self.config.get("apps_json", {})
+        path = Path(app_cfg["path"])
+        raw_text = path.read_text(encoding="utf-8")
+        data = json.loads(raw_text)
+        records = nested_get(data, app_cfg.get("list_path", ""))
+        if not isinstance(records, (list, Mapping)):
+            raise TypeError("apps_json.list_path must resolve to a list or object")
+        expected_name = str(expected_name or self.app_name())
+        name_key = app_cfg.get("name_key", "app_name")
+        command_key = app_cfg.get("command_key", "command")
+        match = None
+        if isinstance(records, Mapping):
+            for key, record in records.items():
+                if str(key) == expected_name:
+                    match = record
+                    break
+                if isinstance(record, Mapping) and str(record.get(name_key)) == expected_name:
+                    match = record
+                    break
+            record_count = len(records)
+            container_kind = "mapping"
+        else:
+            for record in records:
+                if isinstance(record, Mapping) and str(record.get(name_key)) == expected_name:
+                    match = record
+                    break
+            record_count = len(records)
+            container_kind = "list"
+        record = dict(match) if isinstance(match, Mapping) else None
+        command = record.get(command_key) if record else None
+        return {
+            "json_path": str(path),
+            "sha256": hashlib.sha256(raw_text.encode("utf-8")).hexdigest(),
+            "expected_app_name": expected_name,
+            "exists": bool(record),
+            "record_count": record_count,
+            "container_kind": container_kind,
+            "record": record,
+            "command": command,
+        }
+
+    def app_json_record(self) -> tuple[dict[str, Any] | None, str | None, Any]:
+        snapshot = self.app_json_snapshot()
+        path = Path(snapshot["json_path"])
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return snapshot["record"], snapshot["command"], data
+
+    def is_parser_safe_app_output(self, output: str) -> tuple[bool, str]:
+        normalized = output.strip()
+        if not normalized:
+            return False, "empty"
+        if normalized.lower() in APP_PARSER_SAFE_VALUES:
+            return True, "status_token"
+        try:
+            json.loads(normalized)
+            return True, "json"
+        except json.JSONDecodeError:
+            pass
+        if re.fullmatch(r"-?\d+(?:\.\d+)?", normalized):
+            return True, "numeric"
+        return False, "unrecognized"
+
+    def cleanup_step(self, when: str) -> bool:
+        def perform() -> tuple[Any, Any, dict[str, Any]]:
+            if when == "before" and not self.cleanup_before_run:
+                actual = {
+                    "enabled": self.cleanup_enabled,
+                    "before_run": self.cleanup_before_run,
+                    "after_run": self.cleanup_after_run,
+                    "performed": False,
+                }
+                return actual, True, {"reason": "cleanup.before_run disabled"}
+            if when == "after" and not self.cleanup_after_run:
+                actual = {
+                    "enabled": self.cleanup_enabled,
+                    "before_run": self.cleanup_before_run,
+                    "after_run": self.cleanup_after_run,
+                    "performed": False,
+                }
+                return actual, True, {"reason": "cleanup.after_run disabled"}
+
+            removed: dict[str, Any] = {
+                "machine_rows_deleted": 0,
+                "metric_samples_deleted_for_e2e_machines": 0,
+                "app_metric_samples_deleted_for_e2e_machines": 0,
+                "app_metric_samples_deleted_for_e2e_apps": 0,
+                "custom_metric_samples_deleted": 0,
+                "metric_registry_deleted": 0,
+                "metric_columns_dropped": [],
+                "apps_removed_from_json": [],
+                "apps_json_hash_before": None,
+                "apps_json_hash_after": None,
+            }
+
+            machine_rows = self.query(
+                "SELECT server_id, alias FROM public.machines WHERE alias LIKE %s",
+                ("e2e_%",),
+            )
+            server_ids = [row["server_id"] for row in machine_rows if row.get("server_id")]
+            if server_ids:
+                with self.conn.cursor() as cur:
+                    cur.execute(
+                        "DELETE FROM public.metric_samples WHERE server_id = ANY(%s)",
+                        (server_ids,),
+                    )
+                    removed["metric_samples_deleted_for_e2e_machines"] = cur.rowcount
+                    cur.execute(
+                        "DELETE FROM public.app_metric_samples WHERE server_id = ANY(%s)",
+                        (server_ids,),
+                    )
+                    removed["app_metric_samples_deleted_for_e2e_machines"] = cur.rowcount
+            with self.conn.cursor() as cur:
+                cur.execute(
+                    "DELETE FROM public.app_metric_samples WHERE app_name LIKE %s",
+                    ("e2e_%",),
+                )
+                removed["app_metric_samples_deleted_for_e2e_apps"] = cur.rowcount
+                cur.execute(
+                    "DELETE FROM public.custom_metric_samples WHERE metric_key LIKE %s",
+                    ("e2e_%",),
+                )
+                removed["custom_metric_samples_deleted"] = cur.rowcount
+                cur.execute(
+                    "DELETE FROM public.metric_registry WHERE metric_key LIKE %s",
+                    ("e2e_%",),
+                )
+                removed["metric_registry_deleted"] = cur.rowcount
+                cur.execute(
+                    "DELETE FROM public.machines WHERE alias LIKE %s",
+                    ("e2e_%",),
+                )
+                removed["machine_rows_deleted"] = cur.rowcount
+
+            metric_columns = self.query(
+                """
+                SELECT column_name
+                  FROM information_schema.columns
+                 WHERE table_schema = 'public'
+                   AND table_name = 'metric_samples'
+                   AND column_name LIKE %s
+                 ORDER BY column_name
+                """,
+                ("e2e_%",),
+            )
+            if metric_columns:
+                with self.conn.cursor() as cur:
+                    for row in metric_columns:
+                        column_name = row["column_name"]
+                        cur.execute(
+                            sql.SQL(
+                                "ALTER TABLE public.metric_samples DROP COLUMN IF EXISTS {}"
+                            ).format(sql.Identifier(column_name))
+                        )
+                        removed["metric_columns_dropped"].append(column_name)
+
+            app_cfg = self.config.get("apps_json", {})
+            path = Path(app_cfg["path"])
+            if path.exists():
+                before_snapshot = self.app_json_snapshot(expected_name="e2e_")
+                removed["apps_json_hash_before"] = before_snapshot["sha256"]
+                _, data, records = self.load_apps_json_payload()
+                name_key = app_cfg.get("name_key", "app_name")
+                if isinstance(records, Mapping):
+                    keys_to_remove = []
+                    for key, record in records.items():
+                        record_name = (
+                            str(record.get(name_key))
+                            if isinstance(record, Mapping) and record.get(name_key) is not None
+                            else str(key)
+                        )
+                        if str(key).startswith("e2e_") or record_name.startswith("e2e_"):
+                            keys_to_remove.append(key)
+                    for key in keys_to_remove:
+                        record = records.pop(key)
+                        record_name = (
+                            str(record.get(name_key))
+                            if isinstance(record, Mapping) and record.get(name_key) is not None
+                            else str(key)
+                        )
+                        removed["apps_removed_from_json"].append(record_name)
+                else:
+                    kept_records = []
+                    for record in records:
+                        record_name = (
+                            str(record.get(name_key))
+                            if isinstance(record, Mapping) and record.get(name_key) is not None
+                            else ""
+                        )
+                        if record_name.startswith("e2e_"):
+                            removed["apps_removed_from_json"].append(record_name)
+                            continue
+                        kept_records.append(record)
+                    data = nested_set(data, app_cfg.get("list_path", ""), kept_records)
+                path.write_text(
+                    json.dumps(data, indent=2, sort_keys=True) + "\n",
+                    encoding="utf-8",
+                )
+                removed["apps_json_hash_after"] = hashlib.sha256(
+                    path.read_text(encoding="utf-8").encode("utf-8")
+                ).hexdigest()
+
+            actual = {
+                "performed": True,
+                "when": when,
+                "removed": removed,
+            }
+            evidence = {
+                "database": self.current_database,
+                "requires_test_database": self.raw_config.get("database", {}).get(
+                    "require_test_database", True
+                ),
+                "safe_prefixes": {
+                    "machine_alias": "e2e_",
+                    "metric_key": "e2e_",
+                    "metric_column": "e2e_",
+                    "app_name": "e2e_",
+                },
+            }
+            return actual, True, evidence
+
+        return self.record_step(
+            "preflight" if when == "before" else "cleanup",
+            f"Cleanup test-only E2E artifacts {when} run",
+            perform,
+            expected={
+                "enabled": self.cleanup_enabled,
+                "before_run": self.cleanup_before_run,
+                "after_run": self.cleanup_after_run,
+                "safe_prefixes": ["e2e_"],
+            },
+        )
 
     def record_step(
         self,
@@ -419,12 +755,27 @@ class Runner:
         )
 
     def machine_row(self) -> dict[str, Any] | None:
-        alias = self.config["fixtures"]["machine"]["alias"]
+        alias = self.machine_alias()
         rows = self.query(
             "SELECT * FROM public.machines WHERE alias = %s",
             (alias,),
         )
         return rows[0] if rows else None
+
+    def ensure_machine_absent(self) -> bool:
+        alias = self.machine_alias()
+
+        def perform() -> tuple[Any, Any, dict[str, Any]]:
+            row = self.machine_row()
+            actual = {"alias": alias, "exists": bool(row), "row": row}
+            return actual, row is None, {"query": "SELECT * FROM public.machines WHERE alias = %s"}
+
+        return self.record_step(
+            "machine",
+            "Machine alias is absent before onboarding",
+            perform,
+            expected={"alias": alias, "exists": False},
+        )
 
     def validate_machine_db(self) -> bool:
         expected_machine = self.config["fixtures"]["machine"]
@@ -553,6 +904,7 @@ class Runner:
             )
 
         def perform() -> tuple[Any, Any, dict[str, Any]]:
+            effective_since = self.effective_since(since)
             rows = self.query(
                 """
                 SELECT id, server_id, ts, source_mode, status,
@@ -562,9 +914,13 @@ class Runner:
                  ORDER BY ts DESC
                  LIMIT 5
                 """,
-                (machine["server_id"], since),
+                (machine["server_id"], effective_since),
             )
-            return rows, bool(rows), {"since": iso(since)}
+            return rows, bool(rows), {
+                "captured_before_p1": iso(since),
+                "effective_since": iso(effective_since),
+                "clock_skew_tolerance_seconds": self.clock_skew_tolerance_seconds,
+            }
 
         return self.record_step(
             "machine",
@@ -574,12 +930,41 @@ class Runner:
         )
 
     def registry_row(self) -> dict[str, Any] | None:
-        metric_key = self.config["fixtures"]["metric"]["metric_key"]
+        metric_key = self.metric_key()
         rows = self.query(
             "SELECT * FROM public.metric_registry WHERE metric_key = %s",
             (metric_key,),
         )
         return rows[0] if rows else None
+
+    def ensure_metric_absent(self) -> bool:
+        metric_key = self.metric_key()
+        column_name = self.metric_column_name()
+
+        def perform() -> tuple[Any, Any, dict[str, Any]]:
+            registry = self.registry_row()
+            column_rows = self.metric_column_rows(column_name)
+            actual = {
+                "metric_key": metric_key,
+                "registry_exists": bool(registry),
+                "registry_row": registry,
+                "column_name": column_name,
+                "column_exists": bool(column_rows),
+                "column_rows": column_rows,
+            }
+            return actual, not registry and not column_rows, {}
+
+        return self.record_step(
+            "metric",
+            "Metric key and metric_samples column are absent before onboarding",
+            perform,
+            expected={
+                "metric_key": metric_key,
+                "registry_exists": False,
+                "column_name": column_name,
+                "column_exists": False,
+            },
+        )
 
     def validate_metric_registry(self) -> bool:
         expected_metric = self.config["fixtures"]["metric"]
@@ -664,16 +1049,8 @@ class Runner:
         column_name = registry.get("db_column") or registry.get("column_name")
 
         def perform() -> tuple[Any, Any, dict[str, Any]]:
-            column_rows = self.query(
-                """
-                SELECT column_name, data_type, udt_name
-                  FROM information_schema.columns
-                 WHERE table_schema = 'public'
-                   AND table_name = 'metric_samples'
-                   AND column_name = %s
-                """,
-                (column_name,),
-            )
+            effective_since = self.effective_since(since)
+            column_rows = self.metric_column_rows(column_name)
             if not column_rows:
                 return {"column_exists": False, "samples": []}, False, {}
             statement = sql.SQL(
@@ -685,7 +1062,7 @@ class Runner:
                  LIMIT 5
                 """
             ).format(metric_column=sql.Identifier(column_name))
-            samples = self.query(statement, (machine["server_id"], since))
+            samples = self.query(statement, (machine["server_id"], effective_since))
             has_non_null = any(row.get("metric_value") is not None for row in samples)
             actual = {
                 "column_exists": True,
@@ -693,7 +1070,11 @@ class Runner:
                 "samples": samples,
                 "has_non_null_value": has_non_null,
             }
-            return actual, bool(samples) and has_non_null, {"since": iso(since)}
+            return actual, bool(samples) and has_non_null, {
+                "captured_before_p1": iso(since),
+                "effective_since": iso(effective_since),
+                "clock_skew_tolerance_seconds": self.clock_skew_tolerance_seconds,
+            }
 
         return self.record_step(
             "metric",
@@ -706,22 +1087,45 @@ class Runner:
             },
         )
 
-    def app_json_record(self) -> tuple[dict[str, Any] | None, str | None, Any]:
+    def ensure_app_absent(self) -> bool:
+        app_name = self.app_name()
         app_cfg = self.config.get("apps_json", {})
-        path = Path(app_cfg["path"])
-        data = json.loads(path.read_text(encoding="utf-8"))
-        records = nested_get(data, app_cfg.get("list_path", ""))
-        if isinstance(records, Mapping):
-            records = list(records.values())
-        if not isinstance(records, list):
-            raise TypeError("apps_json.list_path must resolve to a list or object")
-        name_key = app_cfg.get("name_key", "app_name")
-        command_key = app_cfg.get("command_key", "command")
-        expected_name = self.config["fixtures"]["app"]["app_name"]
-        for record in records:
-            if isinstance(record, Mapping) and str(record.get(name_key)) == str(expected_name):
-                return dict(record), record.get(command_key), data
-        return None, None, data
+        path = Path(app_cfg.get("path", ""))
+        if not path.exists():
+            return self.record_step(
+                "app",
+                "Application name is absent before onboarding",
+                lambda: ({}, False, {}),
+                expected={"app_name": app_name, "json_path": str(path)},
+                skip_reason=f"Apps JSON does not exist: {path}",
+            )
+
+        def perform() -> tuple[Any, Any, dict[str, Any]]:
+            snapshot = self.app_json_snapshot(app_name)
+            existing_rows = self.app_samples_for_name(app_name, limit=5)
+            self.runtime_state["app_json_before_onboarding"] = snapshot
+            actual = {
+                "app_name": app_name,
+                "json_path": snapshot["json_path"],
+                "json_sha256": snapshot["sha256"],
+                "app_exists_in_json": snapshot["exists"],
+                "existing_json_record": snapshot["record"],
+                "existing_app_metric_sample_count": len(existing_rows),
+                "existing_app_metric_samples": existing_rows,
+            }
+            evidence = {"json_snapshot": snapshot}
+            return actual, not snapshot["exists"] and not existing_rows, evidence
+
+        return self.record_step(
+            "app",
+            "Application name is absent before onboarding",
+            perform,
+            expected={
+                "app_name": app_name,
+                "app_exists_in_json": False,
+                "existing_app_metric_sample_count": 0,
+            },
+        )
 
     def validate_app_json(self) -> bool:
         app_cfg = self.config.get("apps_json", {})
@@ -736,9 +1140,25 @@ class Runner:
             )
 
         def perform() -> tuple[Any, Any, dict[str, Any]]:
-            record, command, _ = self.app_json_record()
-            actual = {"record": record, "command": command, "json_path": str(path)}
-            return actual, bool(record and command), {}
+            before = self.runtime_state.get("app_json_before_onboarding")
+            after = self.app_json_snapshot(self.app_name())
+            actual = {
+                "before": before,
+                "after": after,
+                "json_path": str(path),
+            }
+            changed_during_run = bool(
+                before
+                and not before.get("exists")
+                and after.get("exists")
+                and before.get("sha256") != after.get("sha256")
+            )
+            evidence = {
+                "new_record": after.get("record"),
+                "command": after.get("command"),
+                "json_hash_changed": None if not before else before.get("sha256") != after.get("sha256"),
+            }
+            return actual, bool(after.get("record") and after.get("command") and changed_during_run), evidence
 
         return self.record_step(
             "app",
@@ -747,6 +1167,7 @@ class Runner:
             expected={
                 "app_name": self.config["fixtures"]["app"]["app_name"],
                 "has_command": True,
+                "created_or_changed_during_run": True,
             },
         )
 
@@ -771,9 +1192,14 @@ class Runner:
                 ssh_command,
                 int(self.execution.get("ssh_timeout_seconds", 10)) + 10,
             )
+            output = result.stdout_tail.strip()
+            parser_safe, parser_mode = self.is_parser_safe_app_output(output)
             actual = {
                 "returncode": result.returncode,
-                "output": result.stdout_tail.strip(),
+                "output": output,
+                "output_non_empty": bool(output),
+                "parser_safe_output": parser_safe,
+                "parser_safe_mode": parser_mode,
             }
             evidence = {
                 "command": command_text,
@@ -782,13 +1208,13 @@ class Runner:
                 "stderr_path": result.stderr_path,
                 "stderr_tail": result.stderr_tail,
             }
-            return actual, result.returncode == 0, evidence
+            return actual, result.returncode == 0 and bool(output) and parser_safe, evidence
 
         return self.record_step(
             "app",
             "Stored application command executes on test machine",
             perform,
-            expected={"returncode": 0},
+            expected={"returncode": 0, "output_non_empty": True, "parser_safe_output": True},
         )
 
     def validate_app_samples(self, since: datetime) -> bool:
@@ -803,21 +1229,12 @@ class Runner:
             )
 
         def perform() -> tuple[Any, Any, dict[str, Any]]:
-            rows = self.query(
-                """
-                SELECT id, server_id, ts, app_name, display_name, status,
-                       cpu_pct, rss_memory_mb, process_count, thread_count,
-                       listening_sockets
-                  FROM public.app_metric_samples
-                 WHERE server_id = %s
-                   AND app_name = %s
-                   AND ts >= %s
-                 ORDER BY ts DESC
-                 LIMIT 5
-                """,
-                (machine["server_id"], app_name, since),
-            )
-            return rows, bool(rows), {"since": iso(since)}
+            rows = self.app_samples_for_name(app_name, since=since, server_id=machine["server_id"])
+            return rows, bool(rows), {
+                "captured_before_p1": iso(since),
+                "effective_since": iso(self.effective_since(since)),
+                "clock_skew_tolerance_seconds": self.clock_skew_tolerance_seconds,
+            }
 
         return self.record_step(
             "app",
@@ -857,11 +1274,31 @@ class Runner:
             fixture_check,
             expected={"fixture_count": 3},
         )
+
+        def app_target_alignment() -> tuple[Any, Any, dict[str, Any]]:
+            machine_alias = self.machine_alias()
+            target_alias = self.config["fixtures"]["app"].get("target_machine_alias")
+            actual = {
+                "machine_alias": machine_alias,
+                "target_machine_alias": target_alias,
+            }
+            return actual, target_alias == machine_alias, {
+                "note": "The app fixture field is kept aligned even though the app skill does not consume it directly."
+            }
+
+        ok &= self.record_step(
+            "preflight",
+            "App fixture target machine alias matches machine fixture alias",
+            app_target_alignment,
+            expected={"target_machine_alias_matches_machine_alias": True},
+        )
         return ok
 
     def run(self) -> int:
         preflight_ok = self.preflight()
+        self.cleanup_step("before")
 
+        self.ensure_machine_absent()
         machine_command_ok = self.command_step(
             "machine", "Run machine onboarding skill", "add_machine"
         )
@@ -873,6 +1310,7 @@ class Runner:
         )
         self.validate_metric_sample_for_machine(p1_machine_start)
 
+        self.ensure_metric_absent()
         metric_command_ok = self.command_step(
             "metric", "Run metric onboarding skill", "add_metric"
         )
@@ -883,6 +1321,7 @@ class Runner:
         )
         self.validate_metric_column_and_value(p1_metric_start)
 
+        self.ensure_app_absent()
         app_command_ok = self.command_step(
             "app", "Run application onboarding skill", "add_app"
         )
@@ -892,6 +1331,8 @@ class Runner:
             "app", "Run p1_fixed.py after application onboarding"
         )
         self.validate_app_samples(p1_app_start)
+        if self.cleanup_after_run:
+            self.cleanup_step("after")
 
         return self.finalize()
 
@@ -901,8 +1342,6 @@ class Runner:
         skipped = sum(step["status"] == SKIP for step in self.steps)
         if failed == 0 and skipped == 0:
             status = PASS
-        elif passed > 0:
-            status = "partial" if skipped else FAIL
         else:
             status = FAIL
         finished = utc_now()
@@ -939,6 +1378,8 @@ class Runner:
             "database": self.current_database,
             "config_path": str(self.config_path),
             "run_directory": str(self.run_dir),
+            "cleanup": redact(self.config.get("cleanup", {})),
+            "validation": redact(self.config.get("validation", {})),
             "fixtures": redact(self.config.get("fixtures", {})),
             "steps": self.steps,
         }

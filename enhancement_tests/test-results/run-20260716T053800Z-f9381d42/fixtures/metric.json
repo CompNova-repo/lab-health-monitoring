@@ -1,0 +1,15 @@
+{
+  "collection_command": "awk '{print $1}' /proc/loadavg",
+  "column_name": "e2e_load_1m_f9381d42",
+  "command_strategy": "linux_shell_first_float",
+  "command_text": "awk '{print $1}' /proc/loadavg",
+  "db_column": "e2e_load_1m_f9381d42",
+  "db_type": "double precision",
+  "display_name": "E2E Load Average 1m",
+  "enabled": true,
+  "metric_key": "e2e_load_1m_f9381d42",
+  "parser": "first_float",
+  "parser_name": "first_float",
+  "timeout_seconds": 10,
+  "unit": "load"
+}

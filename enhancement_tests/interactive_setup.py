@@ -151,7 +151,7 @@ def step_machine() -> dict[str, Any]:
     print("  The E2E test needs a Linux machine reachable via SSH.")
     print("  The machine-entrypoint will validate SSH and register it in the DB.\n")
 
-    alias = prompt("Machine alias", "e2e-test-{run_short}")
+    alias = prompt("Machine alias", "e2e_machine_{run_short}")
     hostname = prompt("Expected hostname (leave empty if unknown)", "")
     ip = prompt("IP address or hostname", "")
     if not ip:
@@ -244,26 +244,27 @@ def step_metric() -> dict[str, Any]:
     }
 
 
-def step_app() -> dict[str, Any]:
+def step_app(machine_alias: str) -> dict[str, Any]:
     heading("Step 4 — Application to Monitor")
 
     print("  The E2E test will register a harmless application.")
     print("  Default: sshd (present on almost every Linux server).\n")
 
-    default_name = "sshd"
+    default_name = "e2e_sshd_{run_short}"
     default_service = "ssh"
     default_pattern = "sshd"
+    default_display = "E2E SSHD {run_short}"
 
     app_name = prompt("Application name", default_name)
     service_name = prompt("systemd service name", default_service)
     process_pattern = prompt("Process pattern (regex)", default_pattern)
-    display_name = prompt("Display name", app_name)
+    display_name = prompt("Display name", default_display)
 
     fixture = {
         "app_name": app_name,
         "display_name": display_name,
         "command": f"pgrep -x {process_pattern} >/dev/null && echo running || echo stopped",
-        "target_machine_alias": "e2e-test-{run_short}",
+        "target_machine_alias": machine_alias,
     }
 
     # headless_add_app.py takes inline CLI args
@@ -305,6 +306,11 @@ def generate_config(
             "p1_timeout_seconds": 300,
             "ssh_timeout_seconds": 10,
             "results_directory": "./test-results",
+        },
+        "cleanup": {
+            "enabled": True,
+            "before_run": True,
+            "after_run": False,
         },
         "commands": {
             "add_machine": machine["command"],
@@ -380,7 +386,7 @@ def main():
     db = step_database()
     machine = step_machine()
     metric = step_metric()
-    app = step_app()
+    app = step_app(machine["fixture"]["alias"])
 
     config = generate_config(db, machine, metric, app)
     print_summary(config)

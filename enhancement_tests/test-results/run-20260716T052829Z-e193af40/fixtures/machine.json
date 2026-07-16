@@ -1,0 +1,9 @@
+{
+  "alias": "e2e_machine_e193af40",
+  "hostname": "",
+  "ip_address": "35.238.107.235",
+  "monitoring_enabled": true,
+  "ssh_key_path": "/home/vagrant/.ssh/id_ed25519",
+  "ssh_port": 22,
+  "ssh_user": "pulkit-centos"
+}

@@ -97,3 +97,14 @@ metrics:
     parser: "first_float"
     timeout_seconds: 15
     enabled: true
+
+  e2e_load_1m_d1998b7e:
+    display_name: E2E Load Average 1m
+    column_name: "e2e_load_1m_d1998b7e"
+    db_type: "DOUBLE PRECISION"
+    unit: load
+    script: "new-metrics/e2e_load_1m_d1998b7e.py"
+    command: "awk '{print $1}' /proc/loadavg"
+    parser: "first_float"
+    timeout_seconds: 15
+    enabled: true
