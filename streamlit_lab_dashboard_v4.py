@@ -33,6 +33,7 @@ import re
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
+from mesh_ping_section import render_mesh_ping_section
 
 # ---------------------------------------------------------------------------
 # Page config
@@ -44,6 +45,21 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
+
+
+# --- Mesh Ping page switcher ---
+dashboard_page = st.sidebar.radio(
+    "Dashboard section",
+    ["Main Dashboard", "Mesh Ping"],
+    index=0,
+)
+
+if dashboard_page == "Mesh Ping":
+    render_mesh_ping_section()
+    st.stop()
+# --- End Mesh Ping page switcher ---
+
+
 
 # ---------------------------------------------------------------------------
 # Global styling
@@ -122,11 +138,11 @@ with header_r:
 # ---------------------------------------------------------------------------
 
 PG_KWARGS = {
-    "host": "localhost",
+    "host": "127.0.0.1",
     "port": 5432,
-    "user": "p1monitor",
-    "password": "replace_with_a_real_password",
-    "dbname": "p1_monitoring",
+    "user": "release_user",
+    "password": os.getenv("P1_DB_PASSWORD", os.getenv("DB_PASSWORD", "")),
+    "dbname": "lab_monitoring_db",
 }
 
 
@@ -1531,7 +1547,7 @@ if not registry_df.empty:
 
 _section_header("📜 Detailed Records", f"Full history — {selected_label}")
 
-tab_metrics, tab_events, tab_apps = st.tabs(["📈 Metrics Log", "⚠️ Breach Events", "🧩 App Metrics"])
+tab_metrics, tab_events, tab_apps, tab_mesh = st.tabs(["📈 Metrics Log", "⚠️ Breach Events", "🧩 App Metrics", "🕸️ Mesh Ping"])
 
 with tab_metrics:
     if metrics_df.empty:
@@ -1659,3 +1675,6 @@ with tab_apps:
         )
 
 st.caption(f"Lab Health Dashboard · PostgreSQL · rendered {datetime.now():%Y-%m-%d %H:%M:%S}")
+
+with tab_mesh:
+    render_mesh_ping_section()
