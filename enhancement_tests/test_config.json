@@ -1,0 +1,114 @@
+{
+  "database": {
+    "dsn_env": "LAB_MONITORING_TEST_DSN",
+    "dsn": "postgresql://release_user:release_password@localhost:5432/e2e_enhancement_test",
+    "require_test_database": true,
+    "audit_in_database": true
+  },
+  "execution": {
+    "continue_after_failure": true,
+    "command_timeout_seconds": 180,
+    "p1_timeout_seconds": 300,
+    "ssh_timeout_seconds": 10,
+    "results_directory": "./test-results"
+  },
+  "commands": {
+    "add_machine": [
+      "/home/vagrant/.pyenv/versions/3.12.10/bin/python",
+      "/home/vagrant/.hermes/skills/add-new-machine/headless_onboard.py",
+      "--alias",
+      "gcp_e32",
+      "--ip",
+      "35.238.107.235",
+      "--user",
+      "pulkit-centos",
+      "--key",
+      "/home/vagrant/.ssh/id_ed25519",
+      "--tags",
+      "e2e",
+      "--monitor",
+      "yes"
+    ],
+    "add_metric": [
+      "/home/vagrant/.pyenv/versions/3.12.10/bin/python",
+      "/home/vagrant/.hermes/skills/new-metric-addition/main.py",
+      "--metric",
+      "e2e_load_1m_{run_short}",
+      "--command",
+      "awk '{print $1}' /proc/loadavg",
+      "--display-name",
+      "E2E Load Average 1m",
+      "--db-type",
+      "DOUBLE PRECISION",
+      "--unit",
+      "load"
+    ],
+    "add_app": [
+      "/home/vagrant/.pyenv/versions/3.12.10/bin/python",
+      "/home/vagrant/.hermes/skills/add-new-apps/headless_add_app.py",
+      "--app-name",
+      "sshd",
+      "--service-name",
+      "ssh",
+      "--process-pattern",
+      "sshd",
+      "--display-name",
+      "sshd",
+      "--overwrite",
+      "--local"
+    ],
+    "p1": [
+      "/home/vagrant/.pyenv/versions/3.12.10/bin/python",
+      "/home/vagrant/.hermes/skills/new-metric-addition/p1_fixed.py",
+      "run",
+      "--mode",
+      "standard"
+    ]
+  },
+  "environment": {
+    "LAB_MONITORING_DSN": "postgresql://release_user:release_password@localhost:5432/e2e_enhancement_test",
+    "P1_DB_HOST": "localhost",
+    "P1_DB_PORT": "5432",
+    "P1_DB_NAME": "e2e_enhancement_test",
+    "P1_DB_USER": "release_user",
+    "P1_DB_PASSWORD": "release_password"
+  },
+  "apps_json": {
+    "path": "/home/vagrant/.hermes/skills/add-new-apps/app_commands.json",
+    "list_path": "apps",
+    "name_key": "app_name",
+    "command_key": "command"
+  },
+  "fixtures": {
+    "machine": {
+      "alias": "gcp_e32",
+      "hostname": "",
+      "ip_address": "35.238.107.235",
+      "ssh_port": 22,
+      "ssh_user": "pulkit-centos",
+      "ssh_key_path": "/home/vagrant/.ssh/id_ed25519",
+      "monitoring_enabled": true
+    },
+    "metric": {
+      "metric_key": "e2e_load_1m_{run_short}",
+      "display_name": "E2E Load Average 1m",
+      "column_name": "e2e_load_1m_{run_short}",
+      "db_column": "e2e_load_1m_{run_short}",
+      "db_type": "double precision",
+      "unit": "load",
+      "command_strategy": "linux_shell_first_float",
+      "command_text": "awk '{print $1}' /proc/loadavg",
+      "collection_command": "awk '{print $1}' /proc/loadavg",
+      "parser": "first_float",
+      "parser_name": "first_float",
+      "timeout_seconds": 10,
+      "enabled": true
+    },
+    "app": {
+      "app_name": "sshd",
+      "display_name": "sshd",
+      "command": "pgrep -x sshd >/dev/null && echo running || echo stopped",
+      "target_machine_alias": "e2e-test-{run_short}"
+    }
+  }
+}

@@ -42,3 +42,58 @@ metrics:
     parser: "first_float"
     timeout_seconds: 15
     enabled: true
+
+  e2e_load_1m_74080efa:
+    display_name: E2E Load Average 1m
+    column_name: "e2e_load_1m_74080efa"
+    db_type: "DOUBLE PRECISION"
+    unit: load
+    script: "new-metrics/e2e_load_1m_74080efa.py"
+    command: "awk '{print $1}' /proc/loadavg"
+    parser: "first_float"
+    timeout_seconds: 15
+    enabled: true
+
+  e2e_load_1m_9957f254:
+    display_name: E2E Load Average 1m
+    column_name: "e2e_load_1m_9957f254"
+    db_type: "DOUBLE PRECISION"
+    unit: load
+    script: "new-metrics/e2e_load_1m_9957f254.py"
+    command: "awk '{print $1}' /proc/loadavg"
+    parser: "first_float"
+    timeout_seconds: 15
+    enabled: true
+
+  e2e_load_1m_58764a2f:
+    display_name: E2E Load Average 1m
+    column_name: "e2e_load_1m_58764a2f"
+    db_type: "DOUBLE PRECISION"
+    unit: load
+    script: "new-metrics/e2e_load_1m_58764a2f.py"
+    command: "awk '{print $1}' /proc/loadavg"
+    parser: "first_float"
+    timeout_seconds: 15
+    enabled: true
+
+  e2e_load_1m_fe14f35a:
+    display_name: E2E Load Average 1m
+    column_name: "e2e_load_1m_fe14f35a"
+    db_type: "DOUBLE PRECISION"
+    unit: load
+    script: "new-metrics/e2e_load_1m_fe14f35a.py"
+    command: "awk '{print $1}' /proc/loadavg"
+    parser: "first_float"
+    timeout_seconds: 15
+    enabled: true
+
+  e2e_load_1m_93a5312a:
+    display_name: E2E Load Average 1m
+    column_name: "e2e_load_1m_93a5312a"
+    db_type: "DOUBLE PRECISION"
+    unit: load
+    script: "new-metrics/e2e_load_1m_93a5312a.py"
+    command: "awk '{print $1}' /proc/loadavg"
+    parser: "first_float"
+    timeout_seconds: 15
+    enabled: true

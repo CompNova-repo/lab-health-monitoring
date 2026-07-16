@@ -1,0 +1,669 @@
+{
+  "run_id": "93a5312a-d558-42f4-b18e-9489e5c37d57",
+  "status": "passed",
+  "started_at": "2026-07-16T03:56:34.252466+00:00",
+  "finished_at": "2026-07-16T04:04:24.545504+00:00",
+  "database": "e2e_enhancement_test",
+  "config_path": "/home/vagrant/.hermes/skills/hermes-enhancement-e2e/test_config.json",
+  "run_directory": "/home/vagrant/.hermes/skills/hermes-enhancement-e2e/test-results/run-20260716T035634Z-93a5312a",
+  "fixtures": {
+    "machine": {
+      "alias": "gcp_e32",
+      "hostname": "",
+      "ip_address": "35.238.107.235",
+      "ssh_port": 22,
+      "ssh_user": "pulkit-centos",
+      "ssh_key_path": "/home/vagrant/.ssh/id_ed25519",
+      "monitoring_enabled": true
+    },
+    "metric": {
+      "metric_key": "e2e_load_1m_93a5312a",
+      "display_name": "E2E Load Average 1m",
+      "column_name": "e2e_load_1m_93a5312a",
+      "db_column": "e2e_load_1m_93a5312a",
+      "db_type": "double precision",
+      "unit": "load",
+      "command_strategy": "linux_shell_first_float",
+      "command_text": "awk '{print $1}' /proc/loadavg",
+      "collection_command": "awk '{print $1}' /proc/loadavg",
+      "parser": "first_float",
+      "parser_name": "first_float",
+      "timeout_seconds": 10,
+      "enabled": true
+    },
+    "app": {
+      "app_name": "sshd",
+      "display_name": "sshd",
+      "command": "pgrep -x sshd >/dev/null && echo running || echo stopped",
+      "target_machine_alias": "e2e-test-93a5312a"
+    }
+  },
+  "steps": [
+    {
+      "sequence_no": 1,
+      "enhancement": "preflight",
+      "step_name": "Connected to an isolated test database",
+      "status": "passed",
+      "started_at": "2026-07-16T03:56:34.273833+00:00",
+      "expected": {
+        "test_database": true
+      },
+      "actual": {
+        "database": "e2e_enhancement_test"
+      },
+      "evidence": {
+        "config_path": "/home/vagrant/.hermes/skills/hermes-enhancement-e2e/test_config.json"
+      },
+      "error_message": null,
+      "finished_at": "2026-07-16T03:56:34.275711+00:00",
+      "duration_ms": 1
+    },
+    {
+      "sequence_no": 2,
+      "enhancement": "preflight",
+      "step_name": "Generated machine, metric, and app test fixtures",
+      "status": "passed",
+      "started_at": "2026-07-16T03:56:34.278635+00:00",
+      "expected": {
+        "fixture_count": 3
+      },
+      "actual": {
+        "machine": "/home/vagrant/.hermes/skills/hermes-enhancement-e2e/test-results/run-20260716T035634Z-93a5312a/fixtures/machine.json",
+        "metric": "/home/vagrant/.hermes/skills/hermes-enhancement-e2e/test-results/run-20260716T035634Z-93a5312a/fixtures/metric.json",
+        "app": "/home/vagrant/.hermes/skills/hermes-enhancement-e2e/test-results/run-20260716T035634Z-93a5312a/fixtures/app.json"
+      },
+      "evidence": {},
+      "error_message": null,
+      "finished_at": "2026-07-16T03:56:34.280642+00:00",
+      "duration_ms": 2
+    },
+    {
+      "sequence_no": 3,
+      "enhancement": "machine",
+      "step_name": "Run machine onboarding skill",
+      "status": "passed",
+      "started_at": "2026-07-16T03:56:34.283119+00:00",
+      "expected": {
+        "returncode": 0,
+        "command_key": "add_machine"
+      },
+      "actual": {
+        "returncode": 0,
+        "duration_ms": 2998
+      },
+      "evidence": {
+        "argv": [
+          "/home/vagrant/.pyenv/versions/3.12.10/bin/python",
+          "/home/vagrant/.hermes/skills/add-new-machine/headless_onboard.py",
+          "--alias",
+          "gcp_e32",
+          "--ip",
+          "35.238.107.235",
+          "--user",
+          "pulkit-centos",
+          "--key",
+          "/home/vagrant/.ssh/id_ed25519",
+          "--tags",
+          "e2e",
+          "--monitor",
+          "yes"
+        ],
+        "stdout_path": "/home/vagrant/.hermes/skills/hermes-enhancement-e2e/test-results/run-20260716T035634Z-93a5312a/logs/003-add_machine.stdout.log",
+        "stderr_path": "/home/vagrant/.hermes/skills/hermes-enhancement-e2e/test-results/run-20260716T035634Z-93a5312a/logs/003-add_machine.stderr.log",
+        "stdout_tail": "Machine YAML written:\n/home/vagrant/.hermes/skills/add-new-machine/pending/new_machine.yaml\nalias: gcp_e32\nip_address: 35.238.107.235\nmonitoring_enabled: true\nssh_key_path: /home/vagrant/.ssh/id_ed25519\nssh_port: 22\nssh_user: pulkit-centos\ntags:\n- e2e\n\n============================================================\nStep 1: Validating machine (SSH)...\nSUCCESS: SSH validation passed.\nSSH validation successful.\nAlias: gcp_e32\nIP: 35.238.107.235\nHostname: instance-20260619-071950\nOS: Debian GNU/Linux 13\nCPU: AMD EPYC 9B45\nCPU cores: 2\nRAM GB: 6.77\nDisk GB: 9.62\n\n============================================================\nStep 2: Ingesting machine into database...\nSUCCESS: Machine ingested into database.\nMachine inserted/updated successfully.\nTemporary YAML deleted.\nAlias: gcp_e32\nIP: 35.238.107.235\nHostname: instance-20260619-071950\n\n============================================================\nOnboarding complete. Machine is now registered and monitored.\n",
+        "stderr_tail": ""
+      },
+      "error_message": null,
+      "finished_at": "2026-07-16T03:56:37.282669+00:00",
+      "duration_ms": 2999
+    },
+    {
+      "sequence_no": 4,
+      "enhancement": "machine",
+      "step_name": "Machine exists in machines table with expected values",
+      "status": "passed",
+      "started_at": "2026-07-16T03:56:37.285369+00:00",
+      "expected": {
+        "alias": "gcp_e32",
+        "hostname": "",
+        "ip_address": "35.238.107.235",
+        "ssh_port": 22,
+        "ssh_user": "pulkit-centos",
+        "ssh_key_path": "/home/vagrant/.ssh/id_ed25519",
+        "monitoring_enabled": true
+      },
+      "actual": {
+        "server_id": "dafefc87-8458-44b5-9d54-c6c7f9e44dd1",
+        "alias": "gcp_e32",
+        "hostname": "instance-20260619-071950",
+        "ip_address": "35.238.107.235",
+        "ssh_port": 22,
+        "os_name": "Debian GNU/Linux",
+        "os_version": "13",
+        "cpu_model": "AMD EPYC 9B45",
+        "cpu_cores": 2,
+        "ram_gb": 6.77,
+        "disk_total_gb": 9.62,
+        "tags": [
+          "e2e"
+        ],
+        "monitoring_enabled": true,
+        "created_at": "2026-07-16T03:16:30.325794+00:00",
+        "updated_at": "2026-07-16T03:56:37.266327+00:00",
+        "cpu_temp_c": null,
+        "ssh_user": "pulkit-centos",
+        "ssh_key_path": "/home/vagrant/.ssh/id_ed25519"
+      },
+      "evidence": {
+        "mismatches": {}
+      },
+      "error_message": null,
+      "finished_at": "2026-07-16T03:56:37.287216+00:00",
+      "duration_ms": 1
+    },
+    {
+      "sequence_no": 5,
+      "enhancement": "machine",
+      "step_name": "Machine SSH port is reachable",
+      "status": "passed",
+      "started_at": "2026-07-16T03:56:37.289973+00:00",
+      "expected": {
+        "host": "35.238.107.235",
+        "port": 22,
+        "reachable": true
+      },
+      "actual": {
+        "host": "35.238.107.235",
+        "port": 22,
+        "latency_ms": 266
+      },
+      "evidence": {},
+      "error_message": null,
+      "finished_at": "2026-07-16T03:56:37.558412+00:00",
+      "duration_ms": 268
+    },
+    {
+      "sequence_no": 6,
+      "enhancement": "machine",
+      "step_name": "Machine accepts non-interactive SSH",
+      "status": "passed",
+      "started_at": "2026-07-16T03:56:37.570197+00:00",
+      "expected": {
+        "returncode": 0,
+        "hostname_matches_database": true
+      },
+      "actual": {
+        "returncode": 0,
+        "hostname": "instance-20260619-071950",
+        "hostname_matches_database": true
+      },
+      "evidence": {
+        "argv": [
+          "ssh",
+          "-o",
+          "BatchMode=yes",
+          "-o",
+          "ConnectTimeout=10",
+          "-o",
+          "StrictHostKeyChecking=accept-new",
+          "-p",
+          "22",
+          "-i",
+          "/home/vagrant/.ssh/id_ed25519",
+          "pulkit-centos@35.238.107.235",
+          "hostname"
+        ],
+        "stdout_path": "/home/vagrant/.hermes/skills/hermes-enhancement-e2e/test-results/run-20260716T035634Z-93a5312a/logs/006-ssh-hostname.stdout.log",
+        "stderr_path": "/home/vagrant/.hermes/skills/hermes-enhancement-e2e/test-results/run-20260716T035634Z-93a5312a/logs/006-ssh-hostname.stderr.log",
+        "stderr_tail": ""
+      },
+      "error_message": null,
+      "finished_at": "2026-07-16T03:56:44.901207+00:00",
+      "duration_ms": 7331
+    },
+    {
+      "sequence_no": 7,
+      "enhancement": "machine",
+      "step_name": "Run p1_fixed.py after machine onboarding",
+      "status": "passed",
+      "started_at": "2026-07-16T03:56:44.921483+00:00",
+      "expected": {
+        "returncode": 0,
+        "command_key": "p1"
+      },
+      "actual": {
+        "returncode": 0,
+        "duration_ms": 144305
+      },
+      "evidence": {
+        "argv": [
+          "/home/vagrant/.pyenv/versions/3.12.10/bin/python",
+          "/home/vagrant/.hermes/skills/new-metric-addition/p1_fixed.py",
+          "run",
+          "--mode",
+          "standard"
+        ],
+        "stdout_path": "/home/vagrant/.hermes/skills/hermes-enhancement-e2e/test-results/run-20260716T035634Z-93a5312a/logs/007-p1.stdout.log",
+        "stderr_path": "/home/vagrant/.hermes/skills/hermes-enhancement-e2e/test-results/run-20260716T035634Z-93a5312a/logs/007-p1.stderr.log",
+        "stdout_tail": "{\n  \"mode\": \"standard\",\n  \"processed_machines\": [\n    \"gcp01\",\n    \"gcp_14_july\",\n    \"gcp_14_july_2\",\n    \"gcp_e32\",\n    \"gcp_latest\",\n    \"gcp_testing\"\n  ],\n  \"skipped_machines\": [\n    \"GCP-5-small\",\n    \"GCP-6-medium\",\n    \"gcp_final\",\n    \"GCP Fourth Box\",\n    \"gcp_mid\",\n    \"gcp_previous\",\n    \"mock-analytics-target-01\",\n    \"mock-cron-target-02\",\n    \"mock-network-target-03\",\n    \"web01\",\n    \"web-prod-01\",\n    \"web-prod-02\",\n    \"web-prod-03\",\n    \"web-prod-04\",\n    \"web-prod-05\",\n    \"web-prod-06\",\n    \"web-prod-07\",\n    \"web-prod-08\",\n    \"web-prod-09\",\n    \"web-prod-10\",\n    \"web-prod-11\",\n    \"web-prod-12\",\n    \"web-prod-13\",\n    \"web-prod-14\",\n    \"web-prod-15\",\n    \"web-prod-16\",\n    \"web-prod-17\",\n    \"web-prod-18\",\n    \"web-prod-19\",\n    \"web-prod-20\",\n    \"web-prod-21\",\n    \"web-prod-22\",\n    \"web-prod-23\",\n    \"web-prod-24\",\n    \"web-prod-25\",\n    \"web-prod-26\",\n    \"web-prod-27\",\n    \"web-prod-28\",\n    \"web-prod-29\",\n    \"web-prod-30\",\n    \"web-prod-31\",\n    \"web-prod-32\",\n    \"web-prod-33\",\n    \"web-prod-34\",\n    \"web-prod-35\",\n    \"web-prod-36\",\n    \"web-prod-37\",\n    \"web-prod-38\",\n    \"web-prod-39\",\n    \"web-prod-40\"\n  ],\n  \"new_system_state\": {\n    \"gcp01\": {\n      \"last_ssh_error\": \"ssh: connect to host 136.113.15.82 port 22: Connection timed out\\n\",\n      \"last_checked\": \"2026-07-16T03:56:45Z\",\n      \"install_state\": \"NORMAL\"\n    },\n    \"gcp_14_july\": {\n      \"last_ssh_error\": \"ssh: connect to host 136.119.216.181 port 22: Connection timed out\\n\",\n      \"last_checked\": \"2026-07-16T03:56:55Z\",\n      \"install_state\": \"NORMAL\"\n    },\n    \"gcp_14_july_2\": {\n      \"last_ssh_error\": \"ssh: connect to host 34.61.197.119 port 22: Connection timed out\\n\",\n      \"last_checked\": \"2026-07-16T03:57:05Z\",\n      \"install_state\": \"NORMAL\"\n    },\n    \"gcp_e32\": {\n      \"breach_counters\": {},\n      \"last_checked\": \"2026-07-16T03:57:15Z\",\n      \"last_log_check_ts\": \"2026-07-16T03:57:15Z\",\n      \"install_state\": \"NORMAL\"\n    },\n    \"gcp_latest\": {\n      \"last_ssh_error\": \"ssh: connect to host 34.60.146.206 port 22: Connection timed out\\n\",\n      \"last_checked\": \"2026-07-16T03:58:54Z\",\n      \"install_state\": \"NORMAL\"\n    },\n    \"gcp_testing\": {\n      \"last_ssh_error\": \"ssh: connect to host 34.60.105.250 port 22: Connection refused\\n\",\n      \"last_checked\": \"2026-07-16T03:59:04Z\",\n      \"install_state\": \"NORMAL\"\n    }\n  },\n  \"alerts\": [],\n  \"db_write_ok\": true,\n  \"db_write_error\": null,\n  \"db_write_failed_machines\": [],\n  \"mesh_ping\": {\n    \"results_count\": 0,\n    \"error\": null\n  },\n  \"summary\": \"Processed 6 machine(s) in standard mode. 0 alert(s) fired. Postgres write: OK.\"\n}\n",
+        "stderr_tail": "[p1_helper] gateway unreachable (100% loss), using fallback ping to 8.8.8.8\n[p1_helper] gateway ping: latency=0.3ms loss=0.0%\n55 machines are unreachable from controller: ['web-prod-01', 'web-prod-02', 'web-prod-03', 'web-prod-04', 'web-prod-05', 'web-prod-06', 'web-prod-07', 'web-prod-08', 'web-prod-09', 'web-prod-10', 'web-prod-11', 'web-prod-12', 'web-prod-13', 'web-prod-14', 'web-prod-15', 'web-prod-16', 'web-prod-17', 'web-prod-18', 'web-prod-19', 'web-prod-20', 'web-prod-21', 'web-prod-22', 'web-prod-23', 'web-prod-24', 'web-prod-25', 'web-prod-26', 'web-prod-27', 'web-prod-28', 'web-prod-29', 'web-prod-30', 'web-prod-31', 'web-prod-32', 'web-prod-33', 'web-prod-34', 'web-prod-35', 'web-prod-36', 'web-prod-37', 'web-prod-38', 'web-prod-39', 'web-prod-40', 'GCP Fourth Box', 'GCP-5-small', 'GCP-6-medium', 'mock-analytics-target-01', 'mock-cron-target-02', 'mock-network-target-03', 'gcp01', 'gcp_14_july', 'gcp_14_july_2', 'web01', 'gcp_mid', 'gcp_latest', 'gcp_testing', 'gcp_final', 'gcp_previous']\n"
+      },
+      "error_message": null,
+      "finished_at": "2026-07-16T03:59:09.230263+00:00",
+      "duration_ms": 144308
+    },
+    {
+      "sequence_no": 8,
+      "enhancement": "machine",
+      "step_name": "p1 inserted metric_samples for new machine",
+      "status": "passed",
+      "started_at": "2026-07-16T03:59:09.233790+00:00",
+      "expected": {
+        "server_id": "dafefc87-8458-44b5-9d54-c6c7f9e44dd1",
+        "row_count_min": 1
+      },
+      "actual": [
+        {
+          "id": 47986,
+          "server_id": "dafefc87-8458-44b5-9d54-c6c7f9e44dd1",
+          "ts": "2026-07-16T03:57:15+00:00",
+          "source_mode": "standard",
+          "status": "ok",
+          "cpu_pct": 4.8,
+          "ram_pct": 9.2,
+          "disk_pct": 33.0
+        }
+      ],
+      "evidence": {
+        "since": "2026-07-16T03:56:44.921441+00:00"
+      },
+      "error_message": null,
+      "finished_at": "2026-07-16T03:59:09.235673+00:00",
+      "duration_ms": 1
+    },
+    {
+      "sequence_no": 9,
+      "enhancement": "metric",
+      "step_name": "Run metric onboarding skill",
+      "status": "passed",
+      "started_at": "2026-07-16T03:59:09.238511+00:00",
+      "expected": {
+        "returncode": 0,
+        "command_key": "add_metric"
+      },
+      "actual": {
+        "returncode": 0,
+        "duration_ms": 13090
+      },
+      "evidence": {
+        "argv": [
+          "/home/vagrant/.pyenv/versions/3.12.10/bin/python",
+          "/home/vagrant/.hermes/skills/new-metric-addition/main.py",
+          "--metric",
+          "e2e_load_1m_93a5312a",
+          "--command",
+          "awk '{print $1}' /proc/loadavg",
+          "--display-name",
+          "E2E Load Average 1m",
+          "--db-type",
+          "DOUBLE PRECISION",
+          "--unit",
+          "load"
+        ],
+        "stdout_path": "/home/vagrant/.hermes/skills/hermes-enhancement-e2e/test-results/run-20260716T035634Z-93a5312a/logs/009-add_metric.stdout.log",
+        "stderr_path": "/home/vagrant/.hermes/skills/hermes-enhancement-e2e/test-results/run-20260716T035634Z-93a5312a/logs/009-add_metric.stderr.log",
+        "stdout_tail": "{\n  \"status\": \"ok\",\n  \"metric_key\": \"e2e_load_1m_93a5312a\",\n  \"display_name\": \"E2E Load Average 1m\",\n  \"script\": \"/home/vagrant/.hermes/skills/new-metric-addition/new-metrics/e2e_load_1m_93a5312a.py\",\n  \"registry\": \"/home/vagrant/.hermes/skills/new-metric-addition/metric_registry.yaml\",\n  \"db_column\": \"e2e_load_1m_93a5312a\",\n  \"validated_on\": \"gcp_e32\",\n  \"validated_value\": 0.09,\n  \"raw_output\": \"0.09\"\n}\n",
+        "stderr_tail": ""
+      },
+      "error_message": null,
+      "finished_at": "2026-07-16T03:59:22.332221+00:00",
+      "duration_ms": 13093
+    },
+    {
+      "sequence_no": 10,
+      "enhancement": "metric",
+      "step_name": "Metric exists in metric_registry",
+      "status": "passed",
+      "started_at": "2026-07-16T03:59:22.335665+00:00",
+      "expected": {
+        "metric_key": "e2e_load_1m_93a5312a",
+        "display_name": "E2E Load Average 1m",
+        "column_name": "e2e_load_1m_93a5312a",
+        "db_column": "e2e_load_1m_93a5312a",
+        "db_type": "double precision",
+        "unit": "load",
+        "command_strategy": "linux_shell_first_float",
+        "command_text": "awk '{print $1}' /proc/loadavg",
+        "collection_command": "awk '{print $1}' /proc/loadavg",
+        "parser": "first_float",
+        "parser_name": "first_float",
+        "timeout_seconds": 10,
+        "enabled": true
+      },
+      "actual": {
+        "metric_key": "e2e_load_1m_93a5312a",
+        "display_name": "E2E Load Average 1m",
+        "column_name": "e2e_load_1m_93a5312a",
+        "unit": "load",
+        "value_type": "float",
+        "sql_type": "NUMERIC(10,2)",
+        "command_strategy": "first_float",
+        "command_text": "awk '{print $1}' /proc/loadavg",
+        "parser": "first_float",
+        "chart_group": "Custom",
+        "preferred_viz": "line",
+        "threshold_warning": null,
+        "threshold_critical": null,
+        "enabled": true,
+        "created_at": "2026-07-16T03:59:22.316771+00:00",
+        "updated_at": "2026-07-16T03:59:22.316771+00:00",
+        "db_column": null,
+        "db_type": "double precision",
+        "collection_type": null,
+        "collection_command": null,
+        "timeout_seconds": 15,
+        "chart_type": "line",
+        "id": 194,
+        "description": null,
+        "parser_name": "first_float"
+      },
+      "evidence": {
+        "checks": {
+          "metric_key": true,
+          "column": true,
+          "enabled": true,
+          "has_command": true
+        }
+      },
+      "error_message": null,
+      "finished_at": "2026-07-16T03:59:22.338039+00:00",
+      "duration_ms": 2
+    },
+    {
+      "sequence_no": 11,
+      "enhancement": "metric",
+      "step_name": "Metric command executes successfully on test machine",
+      "status": "passed",
+      "started_at": "2026-07-16T03:59:22.342998+00:00",
+      "expected": {
+        "returncode": 0,
+        "numeric_output": true
+      },
+      "actual": {
+        "returncode": 0,
+        "output": "0.09",
+        "numeric_output": true
+      },
+      "evidence": {
+        "command": "awk '{print $1}' /proc/loadavg",
+        "stdout_path": "/home/vagrant/.hermes/skills/hermes-enhancement-e2e/test-results/run-20260716T035634Z-93a5312a/logs/011-metric-command.stdout.log",
+        "stderr_path": "/home/vagrant/.hermes/skills/hermes-enhancement-e2e/test-results/run-20260716T035634Z-93a5312a/logs/011-metric-command.stderr.log",
+        "stderr_tail": ""
+      },
+      "error_message": null,
+      "finished_at": "2026-07-16T03:59:25.151654+00:00",
+      "duration_ms": 2808
+    },
+    {
+      "sequence_no": 12,
+      "enhancement": "metric",
+      "step_name": "Run p1_fixed.py after metric onboarding",
+      "status": "passed",
+      "started_at": "2026-07-16T03:59:25.173870+00:00",
+      "expected": {
+        "returncode": 0,
+        "command_key": "p1"
+      },
+      "actual": {
+        "returncode": 0,
+        "duration_ms": 146769
+      },
+      "evidence": {
+        "argv": [
+          "/home/vagrant/.pyenv/versions/3.12.10/bin/python",
+          "/home/vagrant/.hermes/skills/new-metric-addition/p1_fixed.py",
+          "run",
+          "--mode",
+          "standard"
+        ],
+        "stdout_path": "/home/vagrant/.hermes/skills/hermes-enhancement-e2e/test-results/run-20260716T035634Z-93a5312a/logs/012-p1.stdout.log",
+        "stderr_path": "/home/vagrant/.hermes/skills/hermes-enhancement-e2e/test-results/run-20260716T035634Z-93a5312a/logs/012-p1.stderr.log",
+        "stdout_tail": "{\n  \"mode\": \"standard\",\n  \"processed_machines\": [\n    \"gcp01\",\n    \"gcp_14_july\",\n    \"gcp_14_july_2\",\n    \"gcp_e32\",\n    \"gcp_latest\",\n    \"gcp_testing\"\n  ],\n  \"skipped_machines\": [\n    \"GCP-5-small\",\n    \"GCP-6-medium\",\n    \"gcp_final\",\n    \"GCP Fourth Box\",\n    \"gcp_mid\",\n    \"gcp_previous\",\n    \"mock-analytics-target-01\",\n    \"mock-cron-target-02\",\n    \"mock-network-target-03\",\n    \"web01\",\n    \"web-prod-01\",\n    \"web-prod-02\",\n    \"web-prod-03\",\n    \"web-prod-04\",\n    \"web-prod-05\",\n    \"web-prod-06\",\n    \"web-prod-07\",\n    \"web-prod-08\",\n    \"web-prod-09\",\n    \"web-prod-10\",\n    \"web-prod-11\",\n    \"web-prod-12\",\n    \"web-prod-13\",\n    \"web-prod-14\",\n    \"web-prod-15\",\n    \"web-prod-16\",\n    \"web-prod-17\",\n    \"web-prod-18\",\n    \"web-prod-19\",\n    \"web-prod-20\",\n    \"web-prod-21\",\n    \"web-prod-22\",\n    \"web-prod-23\",\n    \"web-prod-24\",\n    \"web-prod-25\",\n    \"web-prod-26\",\n    \"web-prod-27\",\n    \"web-prod-28\",\n    \"web-prod-29\",\n    \"web-prod-30\",\n    \"web-prod-31\",\n    \"web-prod-32\",\n    \"web-prod-33\",\n    \"web-prod-34\",\n    \"web-prod-35\",\n    \"web-prod-36\",\n    \"web-prod-37\",\n    \"web-prod-38\",\n    \"web-prod-39\",\n    \"web-prod-40\"\n  ],\n  \"new_system_state\": {\n    \"gcp01\": {\n      \"last_ssh_error\": \"ssh: connect to host 136.113.15.82 port 22: Connection timed out\\n\",\n      \"last_checked\": \"2026-07-16T03:59:25Z\",\n      \"install_state\": \"NORMAL\"\n    },\n    \"gcp_14_july\": {\n      \"last_ssh_error\": \"ssh: connect to host 136.119.216.181 port 22: Connection timed out\\n\",\n      \"last_checked\": \"2026-07-16T03:59:35Z\",\n      \"install_state\": \"NORMAL\"\n    },\n    \"gcp_14_july_2\": {\n      \"last_ssh_error\": \"ssh: connect to host 34.61.197.119 port 22: Connection timed out\\n\",\n      \"last_checked\": \"2026-07-16T03:59:45Z\",\n      \"install_state\": \"NORMAL\"\n    },\n    \"gcp_e32\": {\n      \"breach_counters\": {},\n      \"last_checked\": \"2026-07-16T03:59:55Z\",\n      \"last_log_check_ts\": \"2026-07-16T03:59:55Z\",\n      \"install_state\": \"NORMAL\"\n    },\n    \"gcp_latest\": {\n      \"last_ssh_error\": \"ssh: connect to host 34.60.146.206 port 22: Connection timed out\\n\",\n      \"last_checked\": \"2026-07-16T04:01:37Z\",\n      \"install_state\": \"NORMAL\"\n    },\n    \"gcp_testing\": {\n      \"last_ssh_error\": \"ssh: connect to host 34.60.105.250 port 22: Connection refused\\n\",\n      \"last_checked\": \"2026-07-16T04:01:47Z\",\n      \"install_state\": \"NORMAL\"\n    }\n  },\n  \"alerts\": [],\n  \"db_write_ok\": true,\n  \"db_write_error\": null,\n  \"db_write_failed_machines\": [],\n  \"mesh_ping\": {\n    \"results_count\": 0,\n    \"error\": null\n  },\n  \"summary\": \"Processed 6 machine(s) in standard mode. 0 alert(s) fired. Postgres write: OK.\"\n}\n",
+        "stderr_tail": "[p1_helper] gateway unreachable (100% loss), using fallback ping to 8.8.8.8\n[p1_helper] gateway ping: latency=0.3ms loss=0.0%\n55 machines are unreachable from controller: ['web-prod-01', 'web-prod-02', 'web-prod-03', 'web-prod-04', 'web-prod-05', 'web-prod-06', 'web-prod-07', 'web-prod-08', 'web-prod-09', 'web-prod-10', 'web-prod-11', 'web-prod-12', 'web-prod-13', 'web-prod-14', 'web-prod-15', 'web-prod-16', 'web-prod-17', 'web-prod-18', 'web-prod-19', 'web-prod-20', 'web-prod-21', 'web-prod-22', 'web-prod-23', 'web-prod-24', 'web-prod-25', 'web-prod-26', 'web-prod-27', 'web-prod-28', 'web-prod-29', 'web-prod-30', 'web-prod-31', 'web-prod-32', 'web-prod-33', 'web-prod-34', 'web-prod-35', 'web-prod-36', 'web-prod-37', 'web-prod-38', 'web-prod-39', 'web-prod-40', 'GCP Fourth Box', 'GCP-5-small', 'GCP-6-medium', 'gcp_testing', 'mock-analytics-target-01', 'mock-cron-target-02', 'mock-network-target-03', 'web01', 'gcp_mid', 'gcp_final', 'gcp_previous', 'gcp01', 'gcp_14_july', 'gcp_14_july_2', 'gcp_latest']\n"
+      },
+      "error_message": null,
+      "finished_at": "2026-07-16T04:01:51.949201+00:00",
+      "duration_ms": 146775
+    },
+    {
+      "sequence_no": 13,
+      "enhancement": "metric",
+      "step_name": "p1 created metric_samples column and inserted a value",
+      "status": "passed",
+      "started_at": "2026-07-16T04:01:51.952571+00:00",
+      "expected": {
+        "column_name": "e2e_load_1m_93a5312a",
+        "sample_count_min": 1,
+        "non_null_value": true
+      },
+      "actual": {
+        "column_exists": true,
+        "column": {
+          "column_name": "e2e_load_1m_93a5312a",
+          "data_type": "double precision",
+          "udt_name": "float8"
+        },
+        "samples": [
+          {
+            "id": 47987,
+            "server_id": "dafefc87-8458-44b5-9d54-c6c7f9e44dd1",
+            "ts": "2026-07-16T03:59:55+00:00",
+            "status": "ok",
+            "metric_value": 0.03
+          }
+        ],
+        "has_non_null_value": true
+      },
+      "evidence": {
+        "since": "2026-07-16T03:59:25.173695+00:00"
+      },
+      "error_message": null,
+      "finished_at": "2026-07-16T04:01:51.958881+00:00",
+      "duration_ms": 6
+    },
+    {
+      "sequence_no": 14,
+      "enhancement": "app",
+      "step_name": "Run application onboarding skill",
+      "status": "passed",
+      "started_at": "2026-07-16T04:01:51.961972+00:00",
+      "expected": {
+        "returncode": 0,
+        "command_key": "add_app"
+      },
+      "actual": {
+        "returncode": 0,
+        "duration_ms": 1120
+      },
+      "evidence": {
+        "argv": [
+          "/home/vagrant/.pyenv/versions/3.12.10/bin/python",
+          "/home/vagrant/.hermes/skills/add-new-apps/headless_add_app.py",
+          "--app-name",
+          "sshd",
+          "--service-name",
+          "ssh",
+          "--process-pattern",
+          "sshd",
+          "--display-name",
+          "sshd",
+          "--overwrite",
+          "--local"
+        ],
+        "stdout_path": "/home/vagrant/.hermes/skills/hermes-enhancement-e2e/test-results/run-20260716T035634Z-93a5312a/logs/014-add_app.stdout.log",
+        "stderr_path": "/home/vagrant/.hermes/skills/hermes-enhancement-e2e/test-results/run-20260716T035634Z-93a5312a/logs/014-add_app.stderr.log",
+        "stdout_tail": "{\n  \"status\": \"success\",\n  \"test_mode\": \"local\",\n  \"host_tested\": null,\n  \"test_results\": {\n    \"cpu_pct\": \"0.00\",\n    \"rss_memory_mb\": \"40.07\",\n    \"process_count\": \"5\",\n    \"thread_count\": \"5\",\n    \"listening_sockets\": \"0\",\n    \"status\": \"running\"\n  },\n  \"registry_file\": \"/home/vagrant/.hermes/skills/add-new-apps/app_commands.json\",\n  \"entry\": {\n    \"app_name\": \"sshd\",\n    \"display_name\": \"sshd\",\n    \"service_name\": \"ssh\",\n    \"process_pattern\": \"sshd\",\n    \"enabled\": true,\n    \"created_or_updated_at\": \"2026-07-16T04:01:53.071958+00:00\",\n    \"commands\": {\n      \"process_count\": \"pids=$(ps -eo pid=,ppid=,comm=,args= | awk -v pat=sshd -v self=$$ -v parent=$PPID '$1 != self && $1 != parent && $2 != self && $2 != parent && ($3 ~ pat || $0 ~ pat) && $3 !~ /^(awk|grep|pgrep|ps|ss|bash|sh|timeout)$/ {print $1}'); if [ -z \\\"$pids\\\" ]; then echo 0; else echo \\\"$pids\\\" | wc -l | awk '{print $1+0}'; fi\",\n      \"cpu_pct\": \"pids=$(ps -eo pid=,ppid=,comm=,args= | awk -v pat=sshd -v self=$$ -v parent=$PPID '$1 != self && $1 != parent && $2 != self && $2 != parent && ($3 ~ pat || $0 ~ pat) && $3 !~ /^(awk|grep|pgrep|ps|ss|bash|sh|timeout)$/ {print $1}' | paste -sd, -); if [ -z \\\"$pids\\\" ]; then echo 0.00; else ps -o %cpu= -p \\\"$pids\\\" 2>/dev/null | awk '{s+=$1} END{printf \\\"%.2f\\\\n\\\", s+0}'; fi\",\n      \"rss_memory_mb\": \"pids=$(ps -eo pid=,ppid=,comm=,args= | awk -v pat=sshd -v self=$$ -v parent=$PPID '$1 != self && $1 != parent && $2 != self && $2 != parent && ($3 ~ pat || $0 ~ pat) && $3 !~ /^(awk|grep|pgrep|ps|ss|bash|sh|timeout)$/ {print $1}' | paste -sd, -); if [ -z \\\"$pids\\\" ]; then echo 0.00; else ps -o rss= -p \\\"$pids\\\" 2>/dev/null | awk '{s+=$1} END{printf \\\"%.2f\\\\n\\\", s/1024}'; fi\",\n      \"thread_count\": \"pids=$(ps -eo pid=,ppid=,comm=,args= | awk -v pat=sshd -v self=$$ -v parent=$PPID '$1 != self && $1 != parent && $2 != self && $2 != parent && ($3 ~ pat || $0 ~ pat) && $3 !~ /^(awk|grep|pgrep|ps|ss|bash|sh|timeout)$/ {print $1}' | paste -sd, -); if [ -z \\\"$pids\\\" ]; then echo 0; else ps -o nlwp= -p \\\"$pids\\\" 2>/dev/null | awk '{s+=$1} END{print s+0}'; fi\",\n      \"listening_sockets\": \"pid_re=$(ps -eo pid=,ppid=,comm=,args= | awk -v pat=sshd -v self=$$ -v parent=$PPID '$1 != self && $1 != parent && $2 != self && $2 != parent && ($3 ~ pat || $0 ~ pat) && $3 !~ /^(awk|grep|pgrep|ps|ss|bash|sh|timeout)$/ {print $1}' | paste -sd'|' -); if [ -z \\\"$pid_re\\\" ]; then echo 0; else ss -lntup 2>/dev/null | grep -E \\\"pid=($pid_re),\\\" | wc -l | awk '{print $1+0}'; fi\",\n      \"status\": \"state=$(systemctl is-active ssh 2>/dev/null || true); if [ \\\"$state\\\" = active ]; then echo running; elif [ \\\"$state\\\" = activating ] || [ \\\"$state\\\" = reloading ]; then echo restarting; elif [ -n \\\"$(ps -eo pid=,ppid=,comm=,args= | awk -v pat=sshd -v self=$$ -v parent=$PPID '$1 != self && $1 != parent && $2 != self && $2 != parent && ($3 ~ pat || $0 ~ pat) && $3 !~ /^(awk|grep|pgrep|ps|ss|bash|sh|timeout)$/ {print $1}')\\\" ]; then echo running; elif [ \\\"$state\\\" = failed ]; then echo error; else echo stopped; fi\"\n    },\n    \"command\": \"state=$(systemctl is-active ssh 2>/dev/null || true); if [ \\\"$state\\\" = active ]; then echo running; elif [ \\\"$state\\\" = activating ] || [ \\\"$state\\\" = reloading ]; then echo restarting; elif [ -n \\\"$(ps -eo pid=,ppid=,comm=,args= | awk -v pat=sshd -v self=$$ -v parent=$PPID '$1 != self && $1 != parent && $2 != self && $2 != parent && ($3 ~ pat || $0 ~ pat) && $3 !~ /^(awk|grep|pgrep|ps|ss|bash|sh|timeout)$/ {print $1}')\\\" ]; then echo running; elif [ \\\"$state\\\" = failed ]; then echo error; else echo stopped; fi\",\n    \"last_test_outputs\": {\n      \"cpu_pct\": \"0.00\",\n      \"rss_memory_mb\": \"40.07\",\n      \"process_count\": \"5\",\n      \"thread_count\": \"5\",\n      \"listening_sockets\": \"0\",\n      \"status\": \"running\"\n    }\n  }\n}\n",
+        "stderr_tail": ""
+      },
+      "error_message": null,
+      "finished_at": "2026-07-16T04:01:53.083636+00:00",
+      "duration_ms": 1121
+    },
+    {
+      "sequence_no": 15,
+      "enhancement": "app",
+      "step_name": "Application command is stored in monitored apps JSON",
+      "status": "passed",
+      "started_at": "2026-07-16T04:01:53.097944+00:00",
+      "expected": {
+        "app_name": "sshd",
+        "has_command": true
+      },
+      "actual": {
+        "record": {
+          "app_name": "sshd",
+          "command": "state=$(systemctl is-active ssh 2>/dev/null || true); if [ \"$state\" = active ]; then echo running; elif [ \"$state\" = activating ] || [ \"$state\" = reloading ]; then echo restarting; elif [ -n \"$(ps -eo pid=,ppid=,comm=,args= | awk -v pat=sshd -v self=$$ -v parent=$PPID '$1 != self && $1 != parent && $2 != self && $2 != parent && ($3 ~ pat || $0 ~ pat) && $3 !~ /^(awk|grep|pgrep|ps|ss|bash|sh|timeout)$/ {print $1}')\" ]; then echo running; elif [ \"$state\" = failed ]; then echo error; else echo stopped; fi",
+          "commands": {
+            "cpu_pct": "pids=$(ps -eo pid=,ppid=,comm=,args= | awk -v pat=sshd -v self=$$ -v parent=$PPID '$1 != self && $1 != parent && $2 != self && $2 != parent && ($3 ~ pat || $0 ~ pat) && $3 !~ /^(awk|grep|pgrep|ps|ss|bash|sh|timeout)$/ {print $1}' | paste -sd, -); if [ -z \"$pids\" ]; then echo 0.00; else ps -o %cpu= -p \"$pids\" 2>/dev/null | awk '{s+=$1} END{printf \"%.2f\\n\", s+0}'; fi",
+            "listening_sockets": "pid_re=$(ps -eo pid=,ppid=,comm=,args= | awk -v pat=sshd -v self=$$ -v parent=$PPID '$1 != self && $1 != parent && $2 != self && $2 != parent && ($3 ~ pat || $0 ~ pat) && $3 !~ /^(awk|grep|pgrep|ps|ss|bash|sh|timeout)$/ {print $1}' | paste -sd'|' -); if [ -z \"$pid_re\" ]; then echo 0; else ss -lntup 2>/dev/null | grep -E \"pid=($pid_re),\" | wc -l | awk '{print $1+0}'; fi",
+            "process_count": "pids=$(ps -eo pid=,ppid=,comm=,args= | awk -v pat=sshd -v self=$$ -v parent=$PPID '$1 != self && $1 != parent && $2 != self && $2 != parent && ($3 ~ pat || $0 ~ pat) && $3 !~ /^(awk|grep|pgrep|ps|ss|bash|sh|timeout)$/ {print $1}'); if [ -z \"$pids\" ]; then echo 0; else echo \"$pids\" | wc -l | awk '{print $1+0}'; fi",
+            "rss_memory_mb": "pids=$(ps -eo pid=,ppid=,comm=,args= | awk -v pat=sshd -v self=$$ -v parent=$PPID '$1 != self && $1 != parent && $2 != self && $2 != parent && ($3 ~ pat || $0 ~ pat) && $3 !~ /^(awk|grep|pgrep|ps|ss|bash|sh|timeout)$/ {print $1}' | paste -sd, -); if [ -z \"$pids\" ]; then echo 0.00; else ps -o rss= -p \"$pids\" 2>/dev/null | awk '{s+=$1} END{printf \"%.2f\\n\", s/1024}'; fi",
+            "status": "state=$(systemctl is-active ssh 2>/dev/null || true); if [ \"$state\" = active ]; then echo running; elif [ \"$state\" = activating ] || [ \"$state\" = reloading ]; then echo restarting; elif [ -n \"$(ps -eo pid=,ppid=,comm=,args= | awk -v pat=sshd -v self=$$ -v parent=$PPID '$1 != self && $1 != parent && $2 != self && $2 != parent && ($3 ~ pat || $0 ~ pat) && $3 !~ /^(awk|grep|pgrep|ps|ss|bash|sh|timeout)$/ {print $1}')\" ]; then echo running; elif [ \"$state\" = failed ]; then echo error; else echo stopped; fi",
+            "thread_count": "pids=$(ps -eo pid=,ppid=,comm=,args= | awk -v pat=sshd -v self=$$ -v parent=$PPID '$1 != self && $1 != parent && $2 != self && $2 != parent && ($3 ~ pat || $0 ~ pat) && $3 !~ /^(awk|grep|pgrep|ps|ss|bash|sh|timeout)$/ {print $1}' | paste -sd, -); if [ -z \"$pids\" ]; then echo 0; else ps -o nlwp= -p \"$pids\" 2>/dev/null | awk '{s+=$1} END{print s+0}'; fi"
+          },
+          "created_or_updated_at": "2026-07-16T04:01:53.071958+00:00",
+          "display_name": "sshd",
+          "enabled": true,
+          "last_test_outputs": {
+            "cpu_pct": "0.00",
+            "listening_sockets": "0",
+            "process_count": "5",
+            "rss_memory_mb": "40.07",
+            "status": "running",
+            "thread_count": "5"
+          },
+          "process_pattern": "sshd",
+          "service_name": "ssh"
+        },
+        "command": "state=$(systemctl is-active ssh 2>/dev/null || true); if [ \"$state\" = active ]; then echo running; elif [ \"$state\" = activating ] || [ \"$state\" = reloading ]; then echo restarting; elif [ -n \"$(ps -eo pid=,ppid=,comm=,args= | awk -v pat=sshd -v self=$$ -v parent=$PPID '$1 != self && $1 != parent && $2 != self && $2 != parent && ($3 ~ pat || $0 ~ pat) && $3 !~ /^(awk|grep|pgrep|ps|ss|bash|sh|timeout)$/ {print $1}')\" ]; then echo running; elif [ \"$state\" = failed ]; then echo error; else echo stopped; fi",
+        "json_path": "/home/vagrant/.hermes/skills/add-new-apps/app_commands.json"
+      },
+      "evidence": {},
+      "error_message": null,
+      "finished_at": "2026-07-16T04:01:53.099413+00:00",
+      "duration_ms": 1
+    },
+    {
+      "sequence_no": 16,
+      "enhancement": "app",
+      "step_name": "Stored application command executes on test machine",
+      "status": "passed",
+      "started_at": "2026-07-16T04:01:53.103351+00:00",
+      "expected": {
+        "returncode": 0
+      },
+      "actual": {
+        "returncode": 0,
+        "output": "running"
+      },
+      "evidence": {
+        "command": "state=$(systemctl is-active ssh 2>/dev/null || true); if [ \"$state\" = active ]; then echo running; elif [ \"$state\" = activating ] || [ \"$state\" = reloading ]; then echo restarting; elif [ -n \"$(ps -eo pid=,ppid=,comm=,args= | awk -v pat=sshd -v self=$$ -v parent=$PPID '$1 != self && $1 != parent && $2 != self && $2 != parent && ($3 ~ pat || $0 ~ pat) && $3 !~ /^(awk|grep|pgrep|ps|ss|bash|sh|timeout)$/ {print $1}')\" ]; then echo running; elif [ \"$state\" = failed ]; then echo error; else echo stopped; fi",
+        "record": {
+          "app_name": "sshd",
+          "command": "state=$(systemctl is-active ssh 2>/dev/null || true); if [ \"$state\" = active ]; then echo running; elif [ \"$state\" = activating ] || [ \"$state\" = reloading ]; then echo restarting; elif [ -n \"$(ps -eo pid=,ppid=,comm=,args= | awk -v pat=sshd -v self=$$ -v parent=$PPID '$1 != self && $1 != parent && $2 != self && $2 != parent && ($3 ~ pat || $0 ~ pat) && $3 !~ /^(awk|grep|pgrep|ps|ss|bash|sh|timeout)$/ {print $1}')\" ]; then echo running; elif [ \"$state\" = failed ]; then echo error; else echo stopped; fi",
+          "commands": {
+            "cpu_pct": "pids=$(ps -eo pid=,ppid=,comm=,args= | awk -v pat=sshd -v self=$$ -v parent=$PPID '$1 != self && $1 != parent && $2 != self && $2 != parent && ($3 ~ pat || $0 ~ pat) && $3 !~ /^(awk|grep|pgrep|ps|ss|bash|sh|timeout)$/ {print $1}' | paste -sd, -); if [ -z \"$pids\" ]; then echo 0.00; else ps -o %cpu= -p \"$pids\" 2>/dev/null | awk '{s+=$1} END{printf \"%.2f\\n\", s+0}'; fi",
+            "listening_sockets": "pid_re=$(ps -eo pid=,ppid=,comm=,args= | awk -v pat=sshd -v self=$$ -v parent=$PPID '$1 != self && $1 != parent && $2 != self && $2 != parent && ($3 ~ pat || $0 ~ pat) && $3 !~ /^(awk|grep|pgrep|ps|ss|bash|sh|timeout)$/ {print $1}' | paste -sd'|' -); if [ -z \"$pid_re\" ]; then echo 0; else ss -lntup 2>/dev/null | grep -E \"pid=($pid_re),\" | wc -l | awk '{print $1+0}'; fi",
+            "process_count": "pids=$(ps -eo pid=,ppid=,comm=,args= | awk -v pat=sshd -v self=$$ -v parent=$PPID '$1 != self && $1 != parent && $2 != self && $2 != parent && ($3 ~ pat || $0 ~ pat) && $3 !~ /^(awk|grep|pgrep|ps|ss|bash|sh|timeout)$/ {print $1}'); if [ -z \"$pids\" ]; then echo 0; else echo \"$pids\" | wc -l | awk '{print $1+0}'; fi",
+            "rss_memory_mb": "pids=$(ps -eo pid=,ppid=,comm=,args= | awk -v pat=sshd -v self=$$ -v parent=$PPID '$1 != self && $1 != parent && $2 != self && $2 != parent && ($3 ~ pat || $0 ~ pat) && $3 !~ /^(awk|grep|pgrep|ps|ss|bash|sh|timeout)$/ {print $1}' | paste -sd, -); if [ -z \"$pids\" ]; then echo 0.00; else ps -o rss= -p \"$pids\" 2>/dev/null | awk '{s+=$1} END{printf \"%.2f\\n\", s/1024}'; fi",
+            "status": "state=$(systemctl is-active ssh 2>/dev/null || true); if [ \"$state\" = active ]; then echo running; elif [ \"$state\" = activating ] || [ \"$state\" = reloading ]; then echo restarting; elif [ -n \"$(ps -eo pid=,ppid=,comm=,args= | awk -v pat=sshd -v self=$$ -v parent=$PPID '$1 != self && $1 != parent && $2 != self && $2 != parent && ($3 ~ pat || $0 ~ pat) && $3 !~ /^(awk|grep|pgrep|ps|ss|bash|sh|timeout)$/ {print $1}')\" ]; then echo running; elif [ \"$state\" = failed ]; then echo error; else echo stopped; fi",
+            "thread_count": "pids=$(ps -eo pid=,ppid=,comm=,args= | awk -v pat=sshd -v self=$$ -v parent=$PPID '$1 != self && $1 != parent && $2 != self && $2 != parent && ($3 ~ pat || $0 ~ pat) && $3 !~ /^(awk|grep|pgrep|ps|ss|bash|sh|timeout)$/ {print $1}' | paste -sd, -); if [ -z \"$pids\" ]; then echo 0; else ps -o nlwp= -p \"$pids\" 2>/dev/null | awk '{s+=$1} END{print s+0}'; fi"
+          },
+          "created_or_updated_at": "2026-07-16T04:01:53.071958+00:00",
+          "display_name": "sshd",
+          "enabled": true,
+          "last_test_outputs": {
+            "cpu_pct": "0.00",
+            "listening_sockets": "0",
+            "process_count": "5",
+            "rss_memory_mb": "40.07",
+            "status": "running",
+            "thread_count": "5"
+          },
+          "process_pattern": "sshd",
+          "service_name": "ssh"
+        },
+        "stdout_path": "/home/vagrant/.hermes/skills/hermes-enhancement-e2e/test-results/run-20260716T035634Z-93a5312a/logs/016-app-command.stdout.log",
+        "stderr_path": "/home/vagrant/.hermes/skills/hermes-enhancement-e2e/test-results/run-20260716T035634Z-93a5312a/logs/016-app-command.stderr.log",
+        "stderr_tail": ""
+      },
+      "error_message": null,
+      "finished_at": "2026-07-16T04:01:56.080598+00:00",
+      "duration_ms": 2977
+    },
+    {
+      "sequence_no": 17,
+      "enhancement": "app",
+      "step_name": "Run p1_fixed.py after application onboarding",
+      "status": "passed",
+      "started_at": "2026-07-16T04:01:56.100709+00:00",
+      "expected": {
+        "returncode": 0,
+        "command_key": "p1"
+      },
+      "actual": {
+        "returncode": 0,
+        "duration_ms": 148432
+      },
+      "evidence": {
+        "argv": [
+          "/home/vagrant/.pyenv/versions/3.12.10/bin/python",
+          "/home/vagrant/.hermes/skills/new-metric-addition/p1_fixed.py",
+          "run",
+          "--mode",
+          "standard"
+        ],
+        "stdout_path": "/home/vagrant/.hermes/skills/hermes-enhancement-e2e/test-results/run-20260716T035634Z-93a5312a/logs/017-p1.stdout.log",
+        "stderr_path": "/home/vagrant/.hermes/skills/hermes-enhancement-e2e/test-results/run-20260716T035634Z-93a5312a/logs/017-p1.stderr.log",
+        "stdout_tail": "{\n  \"mode\": \"standard\",\n  \"processed_machines\": [\n    \"gcp01\",\n    \"gcp_14_july\",\n    \"gcp_14_july_2\",\n    \"gcp_e32\",\n    \"gcp_latest\",\n    \"gcp_testing\"\n  ],\n  \"skipped_machines\": [\n    \"GCP-5-small\",\n    \"GCP-6-medium\",\n    \"gcp_final\",\n    \"GCP Fourth Box\",\n    \"gcp_mid\",\n    \"gcp_previous\",\n    \"mock-analytics-target-01\",\n    \"mock-cron-target-02\",\n    \"mock-network-target-03\",\n    \"web01\",\n    \"web-prod-01\",\n    \"web-prod-02\",\n    \"web-prod-03\",\n    \"web-prod-04\",\n    \"web-prod-05\",\n    \"web-prod-06\",\n    \"web-prod-07\",\n    \"web-prod-08\",\n    \"web-prod-09\",\n    \"web-prod-10\",\n    \"web-prod-11\",\n    \"web-prod-12\",\n    \"web-prod-13\",\n    \"web-prod-14\",\n    \"web-prod-15\",\n    \"web-prod-16\",\n    \"web-prod-17\",\n    \"web-prod-18\",\n    \"web-prod-19\",\n    \"web-prod-20\",\n    \"web-prod-21\",\n    \"web-prod-22\",\n    \"web-prod-23\",\n    \"web-prod-24\",\n    \"web-prod-25\",\n    \"web-prod-26\",\n    \"web-prod-27\",\n    \"web-prod-28\",\n    \"web-prod-29\",\n    \"web-prod-30\",\n    \"web-prod-31\",\n    \"web-prod-32\",\n    \"web-prod-33\",\n    \"web-prod-34\",\n    \"web-prod-35\",\n    \"web-prod-36\",\n    \"web-prod-37\",\n    \"web-prod-38\",\n    \"web-prod-39\",\n    \"web-prod-40\"\n  ],\n  \"new_system_state\": {\n    \"gcp01\": {\n      \"last_ssh_error\": \"ssh: connect to host 136.113.15.82 port 22: Connection timed out\\n\",\n      \"last_checked\": \"2026-07-16T04:01:56Z\",\n      \"install_state\": \"NORMAL\"\n    },\n    \"gcp_14_july\": {\n      \"last_ssh_error\": \"ssh: connect to host 136.119.216.181 port 22: Connection timed out\\n\",\n      \"last_checked\": \"2026-07-16T04:02:06Z\",\n      \"install_state\": \"NORMAL\"\n    },\n    \"gcp_14_july_2\": {\n      \"last_ssh_error\": \"ssh: connect to host 34.61.197.119 port 22: Connection timed out\\n\",\n      \"last_checked\": \"2026-07-16T04:02:16Z\",\n      \"install_state\": \"NORMAL\"\n    },\n    \"gcp_e32\": {\n      \"breach_counters\": {},\n      \"last_checked\": \"2026-07-16T04:02:26Z\",\n      \"last_log_check_ts\": \"2026-07-16T04:02:26Z\",\n      \"install_state\": \"NORMAL\"\n    },\n    \"gcp_latest\": {\n      \"last_ssh_error\": \"ssh: connect to host 34.60.146.206 port 22: Connection timed out\\n\",\n      \"last_checked\": \"2026-07-16T04:04:08Z\",\n      \"install_state\": \"NORMAL\"\n    },\n    \"gcp_testing\": {\n      \"last_ssh_error\": \"ssh: connect to host 34.60.105.250 port 22: Connection refused\\n\",\n      \"last_checked\": \"2026-07-16T04:04:18Z\",\n      \"install_state\": \"NORMAL\"\n    }\n  },\n  \"alerts\": [],\n  \"db_write_ok\": true,\n  \"db_write_error\": null,\n  \"db_write_failed_machines\": [],\n  \"mesh_ping\": {\n    \"results_count\": 0,\n    \"error\": null\n  },\n  \"summary\": \"Processed 6 machine(s) in standard mode. 0 alert(s) fired. Postgres write: OK.\"\n}\n",
+        "stderr_tail": "[p1_helper] gateway unreachable (100% loss), using fallback ping to 8.8.8.8\n[p1_helper] gateway ping: latency=0.3ms loss=0.0%\n55 machines are unreachable from controller: ['web-prod-01', 'web-prod-02', 'web-prod-03', 'web-prod-04', 'web-prod-05', 'web-prod-06', 'web-prod-07', 'web-prod-08', 'web-prod-09', 'web-prod-10', 'web-prod-11', 'web-prod-12', 'web-prod-13', 'web-prod-14', 'web-prod-15', 'web-prod-16', 'web-prod-17', 'web-prod-18', 'web-prod-19', 'web-prod-20', 'web-prod-21', 'web-prod-22', 'web-prod-23', 'web-prod-24', 'web-prod-25', 'web-prod-26', 'web-prod-27', 'web-prod-28', 'web-prod-29', 'web-prod-30', 'web-prod-31', 'web-prod-32', 'web-prod-33', 'web-prod-34', 'web-prod-35', 'web-prod-36', 'web-prod-37', 'web-prod-38', 'web-prod-39', 'web-prod-40', 'GCP Fourth Box', 'GCP-5-small', 'GCP-6-medium', 'gcp01', 'mock-analytics-target-01', 'mock-cron-target-02', 'mock-network-target-03', 'gcp_14_july', 'gcp_14_july_2', 'gcp_latest', 'gcp_testing', 'web01', 'gcp_mid', 'gcp_final', 'gcp_previous']\n"
+      },
+      "error_message": null,
+      "finished_at": "2026-07-16T04:04:24.534510+00:00",
+      "duration_ms": 148433
+    },
+    {
+      "sequence_no": 18,
+      "enhancement": "app",
+      "step_name": "p1 inserted app_metric_samples for new application",
+      "status": "passed",
+      "started_at": "2026-07-16T04:04:24.539347+00:00",
+      "expected": {
+        "server_id": "dafefc87-8458-44b5-9d54-c6c7f9e44dd1",
+        "app_name": "sshd",
+        "row_count_min": 1
+      },
+      "actual": [
+        {
+          "id": 103801,
+          "server_id": "dafefc87-8458-44b5-9d54-c6c7f9e44dd1",
+          "ts": "2026-07-16T04:02:26+00:00",
+          "app_name": "sshd",
+          "display_name": null,
+          "status": "running",
+          "cpu_pct": 0.0,
+          "rss_memory_mb": 19.17,
+          "process_count": 2,
+          "thread_count": 2,
+          "listening_sockets": 0
+        }
+      ],
+      "evidence": {
+        "since": "2026-07-16T04:01:56.100670+00:00"
+      },
+      "error_message": null,
+      "finished_at": "2026-07-16T04:04:24.541434+00:00",
+      "duration_ms": 2
+    }
+  ]
+}

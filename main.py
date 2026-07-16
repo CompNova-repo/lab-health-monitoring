@@ -401,6 +401,44 @@ def ensure_db_column(conn, column_name, db_type):
     conn.commit()
 
 
+def db_sync_registry(conn, metric_key, meta):
+    """Insert or update the metric_registry DB table with the new metric metadata.
+
+    This ensures the metric_registry database table stays in sync with the YAML
+    registry file, which is required for the E2E test harness and dashboard.
+    """
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            INSERT INTO metric_registry
+                (metric_key, display_name, column_name, unit, chart_group,
+                 preferred_viz, enabled, command_strategy, command_text,
+                 parser_name, timeout_seconds)
+            VALUES (%s, %s, %s, %s, 'Custom', 'line', true, 'first_float', %s,
+                    'first_float', %s)
+            ON CONFLICT (metric_key) DO UPDATE SET
+                display_name = EXCLUDED.display_name,
+                column_name = EXCLUDED.column_name,
+                unit = EXCLUDED.unit,
+                enabled = true,
+                command_strategy = EXCLUDED.command_strategy,
+                command_text = EXCLUDED.command_text,
+                parser_name = EXCLUDED.parser_name,
+                timeout_seconds = EXCLUDED.timeout_seconds,
+                updated_at = now()
+            """,
+            (
+                metric_key,
+                meta.get("display_name", metric_key),
+                metric_key,
+                meta.get("unit", ""),
+                meta.get("command", ""),
+                meta.get("timeout_seconds", 15),
+            ),
+        )
+    conn.commit()
+
+
 # ---------------------------------------------------------------------------
 # Metric resolution
 # ---------------------------------------------------------------------------
@@ -494,6 +532,7 @@ def main():
         script_path = write_metric_script(metric_key, meta)
         update_registry(metric_key, meta, script_path)
         ensure_db_column(conn, metric_key, meta.get("db_type", "DOUBLE PRECISION"))
+        db_sync_registry(conn, metric_key, meta)
 
         conn.close()
 

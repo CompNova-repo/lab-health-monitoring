@@ -4,3 +4,4 @@ freebuff.sh
 older_scripts/
 __pycache__/
 workflow.md
+.env

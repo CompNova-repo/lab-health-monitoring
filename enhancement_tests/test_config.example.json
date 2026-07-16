@@ -1,0 +1,82 @@
+{
+  "database": {
+    "dsn_env": "LAB_MONITORING_TEST_DSN",
+    "require_test_database": true,
+    "audit_in_database": true
+  },
+  "execution": {
+    "continue_after_failure": true,
+    "command_timeout_seconds": 180,
+    "p1_timeout_seconds": 300,
+    "ssh_timeout_seconds": 10,
+    "results_directory": "./test-results"
+  },
+  "commands": {
+    "add_machine": [
+      "python3",
+      "<PATH_TO_MACHINE_SKILL_ENTRYPOINT>",
+      "--spec",
+      "{machine_fixture_path}"
+    ],
+    "add_metric": [
+      "python3",
+      "<PATH_TO_METRIC_SKILL_ENTRYPOINT>",
+      "--spec",
+      "{metric_fixture_path}"
+    ],
+    "add_app": [
+      "python3",
+      "<PATH_TO_APP_SKILL_ENTRYPOINT>",
+      "--spec",
+      "{app_fixture_path}"
+    ],
+    "p1": [
+      "python3",
+      "<PATH_TO_P1_FIXED.PY>",
+      "run",
+      "--mode",
+      "standard"
+    ]
+  },
+  "environment": {
+    "LAB_MONITORING_DSN": "{database_dsn}"
+  },
+  "apps_json": {
+    "path": "<PATH_TO_MONITORED_APPS_JSON>",
+    "list_path": "applications",
+    "name_key": "app_name",
+    "command_key": "command"
+  },
+  "fixtures": {
+    "machine": {
+      "alias": "e2e-machine-{run_short}",
+      "hostname": "<EXPECTED_HOSTNAME_OR_EMPTY>",
+      "ip_address": "<REACHABLE_MACHINE_IP>",
+      "ssh_port": 22,
+      "ssh_user": "<SSH_USER>",
+      "ssh_key_path": "<ABSOLUTE_PRIVATE_KEY_PATH>",
+      "monitoring_enabled": true
+    },
+    "metric": {
+      "metric_key": "e2e_load_1m_{run_short}",
+      "display_name": "E2E Load Average 1m {run_short}",
+      "column_name": "e2e_load_1m_{run_short}",
+      "db_column": "e2e_load_1m_{run_short}",
+      "db_type": "double precision",
+      "unit": "load",
+      "command_strategy": "linux_shell_first_float",
+      "command_text": "awk '{print $1}' /proc/loadavg",
+      "collection_command": "awk '{print $1}' /proc/loadavg",
+      "parser": "first_float",
+      "parser_name": "first_float",
+      "timeout_seconds": 10,
+      "enabled": true
+    },
+    "app": {
+      "app_name": "sshd",
+      "display_name": "SSH daemon",
+      "command": "pgrep -x sshd >/dev/null && echo running || echo stopped",
+      "target_machine_alias": "e2e-machine-{run_short}"
+    }
+  }
+}

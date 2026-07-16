@@ -28,6 +28,8 @@ import subprocess
 import sys
 import time
 
+from dotenv import load_dotenv
+
 try:
     import psycopg2
     import psycopg2.extras
@@ -44,6 +46,10 @@ except Exception:
 
 ROOT = os.getcwd()
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# Keep database credentials outside the source tree. Environment variables that
+# are already set take precedence over values in this file.
+load_dotenv(os.path.join(SCRIPT_DIR, ".env"))
 
 MONITOR_CONFIG = os.path.join(ROOT, "monitor_config.yaml")
 SSH_TARGETS = os.path.join(ROOT, "ssh_targets.yaml")
@@ -72,12 +78,19 @@ CUSTOM_METRICS_FILE = resolve_custom_metrics_file()
 METRIC_REGISTRY_FILE = os.path.join(SCRIPT_DIR, "metric_registry.yaml")
 APP_COMMANDS_FILE = os.path.join(SCRIPT_DIR, "app_commands.json")
 
+def require_env(name):
+    value = os.environ.get(name)
+    if not value:
+        raise RuntimeError(f"Missing required setting in .env: {name}")
+    return value
+
+
 DB_DSN = {
-    "host": os.environ.get("P1_DB_HOST", "127.0.0.1"),
-    "port": os.environ.get("P1_DB_PORT", "5432"),
-    "dbname": os.environ.get("P1_DB_NAME", "lab_monitoring_db"),
-    "user": os.environ.get("P1_DB_USER", "release_user"),
-    "password": os.environ.get("P1_DB_PASSWORD", "release_password"),
+    "host": require_env("P1_DB_HOST"),
+    "port": require_env("P1_DB_PORT"),
+    "dbname": require_env("P1_DB_NAME"),
+    "user": require_env("P1_DB_USER"),
+    "password": require_env("P1_DB_PASSWORD"),
     "connect_timeout": 5,
 }
 
