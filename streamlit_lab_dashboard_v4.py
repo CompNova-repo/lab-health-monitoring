@@ -24,6 +24,7 @@ Expected PostgreSQL tables (schema.sql / new_schema_postgres.sql):
 """
 
 from __future__ import annotations
+import os
 
 import html as html_lib
 from datetime import datetime, timedelta, timezone
@@ -33,7 +34,6 @@ import re
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
-from mesh_ping_section import render_mesh_ping_section
 
 # ---------------------------------------------------------------------------
 # Page config
@@ -47,6 +47,414 @@ st.set_page_config(
 )
 
 
+# --- Inline Mesh Ping Results Dashboard ---
+def render_mesh_ping_results_dashboard():
+    import os
+    import pandas as pd
+    import plotly.graph_objects as go
+    import psycopg2
+    import streamlit as st
+
+    db_config = {
+        "host": os.getenv("P1_DB_HOST", os.getenv("DB_HOST", "127.0.0.1")),
+        "port": int(os.getenv("P1_DB_PORT", os.getenv("DB_PORT", "5432"))),
+        "dbname": os.getenv("P1_DB_NAME", os.getenv("DB_NAME", "lab_monitoring_db")),
+        "user": os.getenv("P1_DB_USER", os.getenv("DB_USER", "release_user")),
+        "password": os.getenv("P1_DB_PASSWORD", os.getenv("DB_PASSWORD", "")),
+    }
+
+    def qident(name):
+        return '"' + str(name).replace('"', '""') + '"'
+
+    def get_columns(conn, table_name):
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_schema = 'public'
+                  AND table_name = %s
+                ORDER BY ordinal_position
+                """,
+                (table_name,),
+            )
+            return [row[0] for row in cur.fetchall()]
+
+    def pick_column(columns, candidates, required=True):
+        lower_map = {c.lower(): c for c in columns}
+        for candidate in candidates:
+            if candidate.lower() in lower_map:
+                return lower_map[candidate.lower()]
+        if required:
+            raise RuntimeError(
+                "Could not find any of these columns in mesh_ping_results: "
+                + ", ".join(candidates)
+                + ". Actual columns: "
+                + ", ".join(columns)
+            )
+        return None
+
+    def load_mesh_ping_results():
+        table_name = "mesh_ping_results"
+
+        with psycopg2.connect(**db_config) as conn:
+            columns = get_columns(conn, table_name)
+
+            if not columns:
+                raise RuntimeError("Table mesh_ping_results does not exist or has no columns.")
+
+            time_col = pick_column(
+                columns,
+                ["ts", "timestamp", "created_at", "checked_at", "sample_time", "time", "created_on"],
+                required=False,
+            )
+            source_col = pick_column(
+                columns,
+                ["source_server_id", "source_machine_id", "source_id", "host_server_id", "host_machine_id", "server_id", "source"],
+                required=True,
+            )
+            target_col = pick_column(
+                columns,
+                ["target_server_id", "target_machine_id", "target_id", "remote_server_id", "target", "target_ip", "destination_server_id"],
+                required=True,
+            )
+            latency_col = pick_column(
+                columns,
+                ["latency_ms", "avg_latency_ms", "rtt_ms", "ping_latency_ms", "response_time_ms"],
+                required=True,
+            )
+            success_col = pick_column(
+                columns,
+                ["success", "is_success", "ping_success", "reachable", "status"],
+                required=False,
+            )
+
+            ts_expr = f"r.{qident(time_col)}" if time_col else "NOW()"
+            where_clause = (
+                f"WHERE r.{qident(time_col)} >= NOW() - INTERVAL '2 days'"
+                if time_col
+                else ""
+            )
+
+            if success_col:
+                success_expr = f"""
+                    CASE
+                        WHEN lower(r.{qident(success_col)}::text) IN ('true', 't', '1', 'success', 'successful', 'ok', 'passed', 'reachable') THEN TRUE
+                        WHEN lower(r.{qident(success_col)}::text) IN ('false', 'f', '0', 'failed', 'failure', 'timeout', 'unreachable', 'error') THEN FALSE
+                        ELSE r.{qident(latency_col)} IS NOT NULL
+                    END
+                """
+            else:
+                success_expr = f"r.{qident(latency_col)} IS NOT NULL"
+
+            sql = f"""
+                SELECT
+                    {ts_expr} AS ts,
+                    COALESCE(src.alias, src.hostname, src.ip_address::text, r.{qident(source_col)}::text) AS source_name,
+                    COALESCE(dst.alias, dst.hostname, dst.ip_address::text, r.{qident(target_col)}::text) AS target_name,
+                    r.{qident(source_col)}::text AS source_value,
+                    r.{qident(target_col)}::text AS target_value,
+                    r.{qident(latency_col)}::double precision AS latency_ms,
+                    {success_expr} AS success
+                FROM {qident(table_name)} r
+                LEFT JOIN machines src
+                    ON src.server_id::text = r.{qident(source_col)}::text
+                    OR src.ip_address::text = r.{qident(source_col)}::text
+                LEFT JOIN machines dst
+                    ON dst.server_id::text = r.{qident(target_col)}::text
+                    OR dst.ip_address::text = r.{qident(target_col)}::text
+                {where_clause}
+                ORDER BY {ts_expr} DESC
+            """
+
+            return pd.read_sql_query(sql, conn), columns
+
+    st.header("Mesh Ping Results")
+    st.caption(
+        "Route-level mesh ping view using mesh_ping_results. "
+        "Each record represents source → target latency, not single-machine latency."
+    )
+
+    threshold_ms = st.number_input(
+        "Expected latency threshold (ms)",
+        min_value=1,
+        max_value=1000,
+        value=50,
+        key="mesh_ping_results_threshold_ms",
+    )
+
+    try:
+        df, table_columns = load_mesh_ping_results()
+    except Exception as exc:
+        st.error(f"Could not load mesh_ping_results: {exc}")
+        return
+
+    st.caption("Source table: mesh_ping_results")
+
+    if df.empty:
+        st.warning("mesh_ping_results has no rows for the selected time window.")
+        return
+
+    df["ts"] = pd.to_datetime(df["ts"], errors="coerce")
+    df["success"] = df["success"].fillna(False).astype(bool)
+
+    df["status"] = df.apply(
+        lambda row: (
+            "FAILED"
+            if not row["success"]
+            else "BREACH"
+            if pd.notna(row["latency_ms"]) and row["latency_ms"] > threshold_ms
+            else "NORMAL"
+        ),
+        axis=1,
+    )
+
+    source_options = sorted(df["source_name"].dropna().unique())
+    selected_source = st.selectbox(
+        "Select source / host machine",
+        source_options,
+        key="mesh_ping_results_source_select",
+    )
+
+    source_df = df[df["source_name"] == selected_source].copy()
+
+    if source_df.empty:
+        st.warning("No mesh ping rows found for this source machine.")
+        return
+
+    agg_df = (
+        source_df.groupby(["source_name", "target_name"])
+        .agg(
+            total_runs=("target_name", "count"),
+            successful_runs=("success", lambda x: int((x == True).sum())),
+            failed_runs=("success", lambda x: int((x == False).sum())),
+            avg_latency_ms=("latency_ms", "mean"),
+            max_latency_ms=("latency_ms", "max"),
+            breach_count=("status", lambda x: int(((x == "BREACH") | (x == "FAILED")).sum())),
+        )
+        .reset_index()
+        .sort_values("target_name")
+    )
+
+    agg_df["route_label"] = agg_df["source_name"] + " → " + agg_df["target_name"]
+
+    total_records = int(len(source_df))
+    total_breaches = int(((source_df["status"] == "BREACH") | (source_df["status"] == "FAILED")).sum())
+    overall_avg = source_df.loc[source_df["success"] == True, "latency_ms"].mean()
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Source / host machine", selected_source)
+    c2.metric("Total records", total_records)
+    c3.metric("Breaches / failures", total_breaches)
+    c4.metric("Average latency", "N/A" if pd.isna(overall_avg) else f"{overall_avg:.2f} ms")
+
+    st.subheader("Average latency by mesh route")
+
+    avg_fig = go.Figure()
+    agg_df = agg_df.reset_index(drop=True)
+
+    for i in range(1, len(agg_df)):
+        prev_row = agg_df.iloc[i - 1]
+        curr_row = agg_df.iloc[i]
+
+        y1 = prev_row["avg_latency_ms"]
+        y2 = curr_row["avg_latency_ms"]
+
+        if pd.isna(y1) or pd.isna(y2):
+            continue
+
+        endpoint_is_breach = y2 > threshold_ms
+
+        avg_fig.add_trace(
+            go.Scatter(
+                x=[prev_row["route_label"], curr_row["route_label"]],
+                y=[y1, y2],
+                mode="lines",
+                line=dict(
+                    color="red" if endpoint_is_breach else "#60a5fa",
+                    width=4,
+                ),
+                showlegend=False,
+                hoverinfo="skip",
+            )
+        )
+
+    normal_df = agg_df[
+        agg_df["avg_latency_ms"].notna()
+        & (agg_df["avg_latency_ms"] <= threshold_ms)
+    ]
+
+    breach_df = agg_df[
+        agg_df["avg_latency_ms"].notna()
+        & (agg_df["avg_latency_ms"] > threshold_ms)
+    ]
+
+    if not normal_df.empty:
+        avg_fig.add_trace(
+            go.Scatter(
+                x=normal_df["route_label"],
+                y=normal_df["avg_latency_ms"],
+                mode="markers",
+                name="At / below threshold",
+                marker=dict(size=10, color="#60a5fa"),
+                customdata=normal_df[["source_name", "target_name"]],
+                hovertemplate=(
+                    "Source / host: %{customdata[0]}<br>"
+                    "Target: %{customdata[1]}<br>"
+                    "Average latency: %{y:.2f} ms<br>"
+                    "Status: Normal<extra></extra>"
+                ),
+            )
+        )
+
+    if not breach_df.empty:
+        avg_fig.add_trace(
+            go.Scatter(
+                x=breach_df["route_label"],
+                y=breach_df["avg_latency_ms"],
+                mode="markers",
+                name="Above threshold",
+                marker=dict(size=13, color="red"),
+                customdata=breach_df[["source_name", "target_name"]],
+                hovertemplate=(
+                    "Source / host: %{customdata[0]}<br>"
+                    "Target: %{customdata[1]}<br>"
+                    "Average latency: %{y:.2f} ms<br>"
+                    "Status: Above threshold<extra></extra>"
+                ),
+            )
+        )
+
+    avg_fig.add_hline(
+        y=threshold_ms,
+        line_dash="dash",
+        opacity=0.45,
+        annotation_text=f"Expected latency: {threshold_ms} ms",
+    )
+
+    avg_fig.update_layout(
+        xaxis_title="Mesh route (source → target)",
+        yaxis_title="Average latency (ms)",
+        height=450,
+    )
+
+    st.plotly_chart(avg_fig, use_container_width=True)
+
+    st.subheader("Latency breach and failure events")
+
+    event_fig = go.Figure()
+
+    normal_points = source_df[
+        (source_df["success"] == True)
+        & (source_df["latency_ms"].notna())
+    ]
+
+    breach_points = source_df[source_df["status"] == "BREACH"]
+    failed_points = source_df[source_df["status"] == "FAILED"].copy()
+
+    if not normal_points.empty:
+        event_fig.add_trace(
+            go.Scatter(
+                x=normal_points["ts"],
+                y=normal_points["latency_ms"],
+                mode="markers",
+                name="Normal ping",
+                marker=dict(size=7, color="#60a5fa", opacity=0.35),
+                customdata=normal_points[["source_name", "target_name", "status"]],
+                hovertemplate=(
+                    "Time: %{x}<br>"
+                    "Source / host: %{customdata[0]}<br>"
+                    "Target: %{customdata[1]}<br>"
+                    "Latency: %{y:.2f} ms<br>"
+                    "Status: %{customdata[2]}<extra></extra>"
+                ),
+            )
+        )
+
+    if not breach_points.empty:
+        event_fig.add_trace(
+            go.Scatter(
+                x=breach_points["ts"],
+                y=breach_points["latency_ms"],
+                mode="markers",
+                name="Latency breach",
+                marker=dict(size=12, color="red"),
+                customdata=breach_points[["source_name", "target_name", "status"]],
+                hovertemplate=(
+                    "Time: %{x}<br>"
+                    "Source / host: %{customdata[0]}<br>"
+                    "Target: %{customdata[1]}<br>"
+                    "Latency: %{y:.2f} ms<br>"
+                    "Status: %{customdata[2]}<extra></extra>"
+                ),
+            )
+        )
+
+    if not failed_points.empty:
+        failed_points["plot_latency"] = threshold_ms
+
+        event_fig.add_trace(
+            go.Scatter(
+                x=failed_points["ts"],
+                y=failed_points["plot_latency"],
+                mode="markers",
+                name="Failed ping",
+                marker=dict(size=13, color="red", symbol="x"),
+                customdata=failed_points[["source_name", "target_name"]],
+                hovertemplate=(
+                    "Time: %{x}<br>"
+                    "Source / host: %{customdata[0]}<br>"
+                    "Target: %{customdata[1]}<br>"
+                    "Latency: no value<br>"
+                    "Status: FAILED<extra></extra>"
+                ),
+            )
+        )
+
+    event_fig.add_hline(
+        y=threshold_ms,
+        line_dash="dash",
+        opacity=0.45,
+        annotation_text=f"Expected latency: {threshold_ms} ms",
+    )
+
+    event_fig.update_layout(
+        xaxis_title="Timestamp",
+        yaxis_title="Latency (ms)",
+        height=500,
+    )
+
+    st.plotly_chart(event_fig, use_container_width=True)
+
+    st.subheader("Raw mesh ping results")
+
+    display_df = source_df[
+        [
+            "ts",
+            "source_name",
+            "target_name",
+            "source_value",
+            "target_value",
+            "success",
+            "latency_ms",
+            "status",
+        ]
+    ].sort_values("ts", ascending=False)
+
+    def color_rows(row):
+        if row["status"] == "FAILED":
+            return ["background-color: rgba(255, 0, 0, 0.25)"] * len(row)
+        if row["status"] == "BREACH":
+            return ["background-color: rgba(255, 165, 0, 0.20)"] * len(row)
+        return ["background-color: rgba(0, 255, 0, 0.12)"] * len(row)
+
+    st.dataframe(
+        display_df.style.apply(color_rows, axis=1),
+        use_container_width=True,
+        hide_index=True,
+    )
+# --- End Inline Mesh Ping Results Dashboard ---
+
 # --- Mesh Ping page switcher ---
 dashboard_page = st.sidebar.radio(
     "Dashboard section",
@@ -55,9 +463,12 @@ dashboard_page = st.sidebar.radio(
 )
 
 if dashboard_page == "Mesh Ping":
-    render_mesh_ping_section()
+    render_mesh_ping_results_dashboard()
     st.stop()
 # --- End Mesh Ping page switcher ---
+
+
+
 
 
 
@@ -1547,7 +1958,7 @@ if not registry_df.empty:
 
 _section_header("📜 Detailed Records", f"Full history — {selected_label}")
 
-tab_metrics, tab_events, tab_apps, tab_mesh = st.tabs(["📈 Metrics Log", "⚠️ Breach Events", "🧩 App Metrics", "🕸️ Mesh Ping"])
+tab_metrics, tab_events, tab_apps = st.tabs(["📈 Metrics Log", "⚠️ Breach Events", "🧩 App Metrics"])
 
 with tab_metrics:
     if metrics_df.empty:
@@ -1676,5 +2087,3 @@ with tab_apps:
 
 st.caption(f"Lab Health Dashboard · PostgreSQL · rendered {datetime.now():%Y-%m-%d %H:%M:%S}")
 
-with tab_mesh:
-    render_mesh_ping_section()
