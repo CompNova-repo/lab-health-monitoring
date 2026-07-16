@@ -1,3 +1,3 @@
 {
-  "summary": "Machine 3c33c5e6-d886-46b3-9791-551fd68febc3 is compute-stable with very low resource usage. However, it suffers from intermittent network instability, with packet loss peaking at 12.5% and latency spikes up to 349ms."
+  "summary": "Machine 3c33c5e6-d886-46b3-9791-551fd68febc3 is over-provisioned and stable in compute, but suffers from strong network degradation (Pearson 0.93 between packet loss and latency)."
 }
