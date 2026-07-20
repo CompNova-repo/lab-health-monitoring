@@ -94,7 +94,12 @@ def render_mesh_ping_results_dashboard():
             )
         return None
 
-    def load_mesh_ping_results():
+    def table_exists(conn, table_name):
+        with conn.cursor() as cur:
+            cur.execute("SELECT to_regclass(%s)", (f"public.{table_name}",))
+            return cur.fetchone()[0] is not None
+
+    def load_mesh_ping_results(time_window_interval):
         table_name = "mesh_ping_results"
 
         with psycopg2.connect(**db_config) as conn:
@@ -128,13 +133,25 @@ def render_mesh_ping_results_dashboard():
                 ["success", "is_success", "ping_success", "reachable", "status"],
                 required=False,
             )
+            source_alias_col = pick_column(
+                columns, ["source_alias", "source_name", "source_hostname"], required=False,
+            )
+            target_alias_col = pick_column(
+                columns, ["target_alias", "target_name", "target_hostname"], required=False,
+            )
+            target_ip_col = pick_column(columns, ["target_ip"], required=False)
+
+            # The `machines` lookup table is optional enrichment, not a hard
+            # dependency: a freshly restored mesh_ping_results dump (e.g. from
+            # the demo SQL export) won't have it, and the panel should still
+            # render using the alias columns already on mesh_ping_results.
+            machines_available = table_exists(conn, "machines")
 
             ts_expr = f"r.{qident(time_col)}" if time_col else "NOW()"
-            where_clause = (
-                f"WHERE r.{qident(time_col)} >= NOW() - INTERVAL '2 days'"
-                if time_col
-                else ""
-            )
+            if time_col and time_window_interval:
+                where_clause = f"WHERE r.{qident(time_col)} >= NOW() - INTERVAL '{time_window_interval}'"
+            else:
+                where_clause = ""
 
             if success_col:
                 success_expr = f"""
@@ -147,22 +164,40 @@ def render_mesh_ping_results_dashboard():
             else:
                 success_expr = f"r.{qident(latency_col)} IS NOT NULL"
 
-            sql = f"""
-                SELECT
-                    {ts_expr} AS ts,
-                    COALESCE(src.alias, src.hostname, src.ip_address::text, r.{qident(source_col)}::text) AS source_name,
-                    COALESCE(dst.alias, dst.hostname, dst.ip_address::text, r.{qident(target_col)}::text) AS target_name,
-                    r.{qident(source_col)}::text AS source_value,
-                    r.{qident(target_col)}::text AS target_value,
-                    r.{qident(latency_col)}::double precision AS latency_ms,
-                    {success_expr} AS success
-                FROM {qident(table_name)} r
+            source_name_candidates = []
+            target_name_candidates = []
+            join_clause = ""
+            if machines_available:
+                source_name_candidates += ["src.alias", "src.hostname", "src.ip_address::text"]
+                target_name_candidates += ["dst.alias", "dst.hostname", "dst.ip_address::text"]
+                join_clause = f"""
                 LEFT JOIN machines src
                     ON src.server_id::text = r.{qident(source_col)}::text
                     OR src.ip_address::text = r.{qident(source_col)}::text
                 LEFT JOIN machines dst
                     ON dst.server_id::text = r.{qident(target_col)}::text
                     OR dst.ip_address::text = r.{qident(target_col)}::text
+                """
+            if source_alias_col:
+                source_name_candidates.append(f"r.{qident(source_alias_col)}")
+            if target_alias_col:
+                target_name_candidates.append(f"r.{qident(target_alias_col)}")
+            if target_ip_col:
+                target_name_candidates.append(f"r.{qident(target_ip_col)}")
+            source_name_candidates.append(f"r.{qident(source_col)}::text")
+            target_name_candidates.append(f"r.{qident(target_col)}::text")
+
+            sql = f"""
+                SELECT
+                    {ts_expr} AS ts,
+                    COALESCE({", ".join(source_name_candidates)}) AS source_name,
+                    COALESCE({", ".join(target_name_candidates)}) AS target_name,
+                    r.{qident(source_col)}::text AS source_value,
+                    r.{qident(target_col)}::text AS target_value,
+                    r.{qident(latency_col)}::double precision AS latency_ms,
+                    {success_expr} AS success
+                FROM {qident(table_name)} r
+                {join_clause}
                 {where_clause}
                 ORDER BY {ts_expr} DESC
             """
@@ -175,16 +210,35 @@ def render_mesh_ping_results_dashboard():
         "Each record represents source → target latency, not single-machine latency."
     )
 
-    threshold_ms = st.number_input(
-        "Expected latency threshold (ms)",
-        min_value=1,
-        max_value=1000,
-        value=50,
-        key="mesh_ping_results_threshold_ms",
-    )
+    col_threshold, col_window = st.columns(2)
+    with col_threshold:
+        threshold_ms = st.number_input(
+            "Expected latency threshold (ms)",
+            min_value=1,
+            max_value=1000,
+            value=50,
+            key="mesh_ping_results_threshold_ms",
+        )
+    with col_window:
+        time_window_options = {
+            "Last 2 hours": "2 hours",
+            "Last 2 days": "2 days",
+            "Last 7 days": "7 days",
+            "Last 30 days": "30 days",
+            "All time": None,
+        }
+        selected_window_label = st.selectbox(
+            "Time window",
+            list(time_window_options.keys()),
+            index=len(time_window_options) - 1,  # default to "All time" so
+            # imported/backfilled data (e.g. demo SQL dumps) isn't silently
+            # filtered out just because it predates a fixed lookback window.
+            key="mesh_ping_results_time_window",
+        )
+        time_window_interval = time_window_options[selected_window_label]
 
     try:
-        df, table_columns = load_mesh_ping_results()
+        df, table_columns = load_mesh_ping_results(time_window_interval)
     except Exception as exc:
         st.error(f"Could not load mesh_ping_results: {exc}")
         return
