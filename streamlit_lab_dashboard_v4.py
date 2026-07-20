@@ -56,11 +56,11 @@ def render_mesh_ping_results_dashboard():
     import streamlit as st
 
     db_config = {
-        "host": os.getenv("P1_DB_HOST", os.getenv("DB_HOST", "127.0.0.1")),
+        "host": os.getenv("P1_DB_HOST", os.getenv("DB_HOST", "localhost")),
         "port": int(os.getenv("P1_DB_PORT", os.getenv("DB_PORT", "5432"))),
         "dbname": os.getenv("P1_DB_NAME", os.getenv("DB_NAME", "lab_monitoring_db")),
         "user": os.getenv("P1_DB_USER", os.getenv("DB_USER", "release_user")),
-        "password": os.getenv("P1_DB_PASSWORD", os.getenv("DB_PASSWORD", "")),
+        "password": os.getenv("P1_DB_PASSWORD", os.getenv("DB_PASSWORD", "release_password")),
     }
 
     def qident(name):
@@ -301,6 +301,48 @@ def render_mesh_ping_results_dashboard():
     c2.metric("Total records", total_records)
     c3.metric("Breaches / failures", total_breaches)
     c4.metric("Average latency", "N/A" if pd.isna(overall_avg) else f"{overall_avg:.2f} ms")
+
+    st.subheader("Mesh Ping Summary")
+    st.caption(
+        f"Threshold: {threshold_ms} ms &nbsp;·&nbsp; "
+        "Breach % = percentage of pings exceeding the threshold or failed per route"
+    )
+
+    summary_df = agg_df[["source_name", "target_name", "breach_count", "total_runs"]].copy()
+    summary_df["breach_pct"] = (summary_df["breach_count"] / summary_df["total_runs"] * 100).round(2)
+    summary_df = summary_df.sort_values("breach_pct", ascending=False).reset_index(drop=True)
+
+    def _color_breach_pct(val):
+        if val > 50:
+            return "color: #ff4b4b; font-weight: 700"
+        elif val > 20:
+            return "color: #ffa500; font-weight: 600"
+        elif val > 0:
+            return "color: #f0e68c"
+        return "color: #4caf50"
+
+    styled_summary = summary_df.style.format(
+        {"breach_count": "{:.0f}", "total_runs": "{:.0f}"}
+    ).map(
+        _color_breach_pct, subset=["breach_pct"]
+    )
+
+    st.dataframe(
+        styled_summary,
+        column_config={
+            "source_name": st.column_config.TextColumn("Host Machine Alias", width="medium"),
+            "target_name": st.column_config.TextColumn("Target Machine Alias", width="medium"),
+            "breach_pct": st.column_config.ProgressColumn(
+                "Threshold Breach %",
+                format="%.2f%%",
+                min_value=0,
+                max_value=100,
+                width="large",
+            ),
+        },
+        use_container_width=True,
+        hide_index=True,
+    )
 
     st.subheader("Average latency by mesh route")
 
@@ -603,10 +645,10 @@ with header_r:
 # ---------------------------------------------------------------------------
 
 PG_KWARGS = {
-    "host": "127.0.0.1",
+    "host": "localhost",
     "port": 5432,
     "user": "release_user",
-    "password": os.getenv("P1_DB_PASSWORD", os.getenv("DB_PASSWORD", "")),
+    "password": os.getenv("P1_DB_PASSWORD", os.getenv("DB_PASSWORD", "release_password")),
     "dbname": "lab_monitoring_db",
 }
 
