@@ -8,10 +8,16 @@ Layout:
   Threshold Alerts       — breach summary cards (click the table row for details)
   KPI Summary            — CPU, RAM, Disk, Latency current value + donut charts
   KPI Trends             — CPU %, RAM %, Disk % time-series (3 columns)
-  Latency & App Metrics  — Net & Disk latency time-series, app uptime table
+  Latency & App Metrics  — Latency card is a 3-view carousel (◀ ▶ arrows):
+                            Net & Disk latency → Mesh ping avg latency by
+                            route → Mesh ping breach/failure events. All
+                            three follow the sidebar's selected machine
+                            (as mesh ping source) and date range. App
+                            Metrics (uptime table) sits stacked below.
   Dynamic metrics        — any custom metrics registered by Hermes
   Detailed Records       — one merged metrics log (all records, selected server)
-                            + breach events + app metric samples, as tabs
+                            + breach events + app metric samples
+                            + raw mesh ping results, as tabs
 
 Design:
   - Single machine selection in the sidebar. All charts reflect the chosen machine.
@@ -20,7 +26,7 @@ Design:
   - Data is cached with a 30 s TTL for auto‑refresh.
 
 Expected PostgreSQL tables (schema.sql / new_schema_postgres.sql):
-  - machines, metric_samples, events
+  - machines, metric_samples, events, mesh_ping_results
 """
 
 from __future__ import annotations
@@ -47,6 +53,7 @@ st.set_page_config(
 )
 
 
+<<<<<<< Updated upstream
 # --- Inline Mesh Ping Results Dashboard ---
 def render_mesh_ping_results_dashboard():
     import os
@@ -568,6 +575,8 @@ if dashboard_page == "Mesh Ping":
 
 
 
+=======
+>>>>>>> Stashed changes
 # ---------------------------------------------------------------------------
 # Global styling
 # ---------------------------------------------------------------------------
@@ -645,11 +654,19 @@ with header_r:
 # ---------------------------------------------------------------------------
 
 PG_KWARGS = {
+<<<<<<< Updated upstream
     "host": "localhost",
     "port": 5432,
     "user": "release_user",
     "password": os.getenv("P1_DB_PASSWORD", os.getenv("DB_PASSWORD", "release_password")),
     "dbname": "lab_monitoring_db",
+=======
+    "host": os.getenv("P1_DB_HOST", os.getenv("DB_HOST", "127.0.0.1")),
+    "port": int(os.getenv("P1_DB_PORT", os.getenv("DB_PORT", "5432"))),
+    "user": os.getenv("P1_DB_USER", os.getenv("DB_USER", "release_user")),
+    "password": os.getenv("P1_DB_PASSWORD", os.getenv("DB_PASSWORD", "")),
+    "dbname": os.getenv("P1_DB_NAME", os.getenv("DB_NAME", "lab_monitoring_db")),
+>>>>>>> Stashed changes
 }
 
 
@@ -1045,6 +1062,78 @@ def load_network_checks(
     for col in ["latency_ms", "packet_loss_pct"]:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce")
+    return df
+
+
+# ---------------------------------------------------------------------------
+# Mesh ping loader — route-level (source → target) latency checks.
+# Filtered by the selected machine as the source, same as every other chart.
+# ---------------------------------------------------------------------------
+
+
+@st.cache_data(ttl=30, show_spinner="Loading mesh ping results …")
+def load_mesh_ping_data(
+    start_ts: Optional[datetime],
+    end_ts: Optional[datetime],
+    source_server_id: Optional[str],
+) -> pd.DataFrame:
+    if not source_server_id:
+        return pd.DataFrame()
+
+    where_clauses: List[str] = ["r.source_server_id = %s::uuid"]
+    params: List[Any] = [source_server_id]
+
+    if start_ts is not None:
+        where_clauses.append("r.ts >= %s")
+        params.append(start_ts)
+    if end_ts is not None:
+        where_clauses.append("r.ts <= %s")
+        params.append(end_ts)
+
+    where_sql = " AND ".join(where_clauses)
+
+    query = f"""
+        SELECT
+            r.id,
+            r.ts,
+            CAST(r.source_server_id AS VARCHAR) AS source_server_id,
+            COALESCE(NULLIF(r.source_alias, ''), sm.alias, CAST(r.source_server_id AS VARCHAR)) AS source_name,
+            CAST(r.target_server_id AS VARCHAR) AS target_server_id,
+            COALESCE(NULLIF(r.target_alias, ''), tm.alias, CAST(r.target_server_id AS VARCHAR)) AS target_name,
+            CAST(r.target_ip AS VARCHAR) AS target_ip,
+            r.success,
+            r.latency_ms
+        FROM mesh_ping_results r
+        LEFT JOIN machines sm ON sm.server_id = r.source_server_id
+        LEFT JOIN machines tm ON tm.server_id = r.target_server_id
+        WHERE {where_sql}
+        ORDER BY r.ts ASC
+    """
+
+    df = _execute_query(query, params)
+
+    if df.empty:
+        return df
+
+    df["ts"] = pd.to_datetime(df["ts"], errors="coerce")
+    df["latency_ms"] = pd.to_numeric(df["latency_ms"], errors="coerce")
+    df["success"] = df["success"].fillna(False).astype(bool)
+    return df
+
+
+def _annotate_mesh_status(df: pd.DataFrame, threshold_ms: float) -> pd.DataFrame:
+    """Add a NORMAL / BREACH / FAILED status column to a mesh ping dataframe."""
+    df = df.copy()
+    df["status"] = df.apply(
+        lambda row: (
+            "FAILED"
+            if not row["success"]
+            else "BREACH"
+            if pd.notna(row["latency_ms"]) and row["latency_ms"] > threshold_ms
+            else "NORMAL"
+        ),
+        axis=1,
+    )
     return df
 
 
@@ -1513,6 +1602,124 @@ def make_latency_chart(
     return fig
 
 
+def make_mesh_route_chart(mesh_df: pd.DataFrame, height: int, threshold_ms: float) -> go.Figure:
+    """Average mesh-ping latency per target route, for the selected source machine."""
+    if mesh_df.empty:
+        return _make_empty_fig()
+
+    agg_df = (
+        mesh_df.groupby("target_name")
+        .agg(
+            avg_latency_ms=("latency_ms", "mean"),
+            breach_count=("latency_ms", lambda s: int((s > threshold_ms).sum())),
+        )
+        .reset_index()
+        .sort_values("target_name")
+        .reset_index(drop=True)
+    )
+
+    fig = go.Figure()
+
+    for i in range(1, len(agg_df)):
+        prev_row, curr_row = agg_df.iloc[i - 1], agg_df.iloc[i]
+        y1, y2 = prev_row["avg_latency_ms"], curr_row["avg_latency_ms"]
+        if pd.isna(y1) or pd.isna(y2):
+            continue
+        fig.add_trace(go.Scatter(
+            x=[prev_row["target_name"], curr_row["target_name"]],
+            y=[y1, y2],
+            mode="lines",
+            line=dict(color="red" if y2 > threshold_ms else "#60a5fa", width=4),
+            showlegend=False,
+            hoverinfo="skip",
+        ))
+
+    normal_df = agg_df[agg_df["avg_latency_ms"].notna() & (agg_df["avg_latency_ms"] <= threshold_ms)]
+    breach_df = agg_df[agg_df["avg_latency_ms"].notna() & (agg_df["avg_latency_ms"] > threshold_ms)]
+
+    if not normal_df.empty:
+        fig.add_trace(go.Scatter(
+            x=normal_df["target_name"], y=normal_df["avg_latency_ms"],
+            mode="markers", name="At / below threshold",
+            marker=dict(size=10, color="#60a5fa"),
+            hovertemplate="Target: %{x}<br>Average latency: %{y:.2f} ms<extra></extra>",
+        ))
+    if not breach_df.empty:
+        fig.add_trace(go.Scatter(
+            x=breach_df["target_name"], y=breach_df["avg_latency_ms"],
+            mode="markers", name="Above threshold",
+            marker=dict(size=13, color="red"),
+            hovertemplate="Target: %{x}<br>Average latency: %{y:.2f} ms<extra></extra>",
+        ))
+
+    fig.add_hline(
+        y=threshold_ms, line_dash="dash", opacity=0.45,
+        annotation_text=f"Expected latency: {threshold_ms:g} ms",
+    )
+    fig.update_layout(
+        template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+    )
+    _apply_scroll_layout(fig, height, "Average latency (ms)", show_legend=True)
+    # Route labels, not timestamps — override the date-axis default from
+    # _apply_scroll_layout (built for time-series charts) with a category
+    # axis, and drop the now-meaningless date rangeslider.
+    fig.update_xaxes(type="category", rangeslider=dict(visible=False), title="Target machine")
+    return fig
+
+
+def make_mesh_events_chart(mesh_df: pd.DataFrame, height: int, threshold_ms: float) -> go.Figure:
+    """Per-ping mesh latency over time for the selected source machine, breaches/failures highlighted."""
+    if mesh_df.empty:
+        return _make_empty_fig()
+
+    status_df = _annotate_mesh_status(mesh_df, threshold_ms)
+
+    normal_points = status_df[status_df["status"] == "NORMAL"]
+    breach_points = status_df[status_df["status"] == "BREACH"]
+    failed_points = status_df[status_df["status"] == "FAILED"].copy()
+
+    fig = go.Figure()
+
+    if not normal_points.empty:
+        fig.add_trace(go.Scatter(
+            x=normal_points["ts"], y=normal_points["latency_ms"],
+            mode="markers", name="Normal ping",
+            marker=dict(size=7, color="#60a5fa", opacity=0.35),
+            customdata=normal_points[["target_name"]],
+            hovertemplate="Time: %{x}<br>Target: %{customdata[0]}<br>Latency: %{y:.2f} ms<extra></extra>",
+        ))
+    if not breach_points.empty:
+        fig.add_trace(go.Scatter(
+            x=breach_points["ts"], y=breach_points["latency_ms"],
+            mode="markers", name="Latency breach",
+            marker=dict(size=12, color="red"),
+            customdata=breach_points[["target_name"]],
+            hovertemplate="Time: %{x}<br>Target: %{customdata[0]}<br>Latency: %{y:.2f} ms<extra></extra>",
+        ))
+    if not failed_points.empty:
+        failed_points["plot_latency"] = threshold_ms
+        fig.add_trace(go.Scatter(
+            x=failed_points["ts"], y=failed_points["plot_latency"],
+            mode="markers", name="Failed ping",
+            marker=dict(size=13, color="red", symbol="x"),
+            customdata=failed_points[["target_name"]],
+            hovertemplate="Time: %{x}<br>Target: %{customdata[0]}<br>Status: FAILED<extra></extra>",
+        ))
+
+    if not fig.data:
+        fig.add_annotation(text="No mesh ping data", xref="paper", yref="paper", x=0.5, y=0.5, showarrow=False)
+
+    fig.add_hline(
+        y=threshold_ms, line_dash="dash", opacity=0.45,
+        annotation_text=f"Expected latency: {threshold_ms:g} ms",
+    )
+    fig.update_layout(
+        template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+    )
+    _apply_scroll_layout(fig, height, "Latency (ms)", show_legend=True)
+    return fig
+
+
 # ---------------------------------------------------------------------------
 # App body
 # ---------------------------------------------------------------------------
@@ -1898,105 +2105,156 @@ with c3:
             key="chart_disk_trend",
         )
 
-# ===== Latency · App Metrics =====
+# ===== Latency (+ Mesh Ping) · App Metrics =====
 
 _section_header("Latency & Application Health", selected_label)
 
-la1, la2 = st.columns(2, gap="medium")
+LATENCY_CAROUSEL_VIEWS = [
+    ("latency", "📶 Latency (Net & Disk)"),
+    ("mesh_route", "🌐 Mesh Ping — Avg Latency by Route"),
+    ("mesh_events", "🌐 Mesh Ping — Breach & Failure Events"),
+]
 
-with la1:
-    with st.container(border=True):
-        st.markdown("**📶 Latency (Net & Disk)**")
+if "latency_carousel_idx" not in st.session_state:
+    st.session_state["latency_carousel_idx"] = 0
+
+with st.container(border=True):
+    nav_prev, nav_title, nav_next = st.columns([1, 12, 1])
+    with nav_prev:
+        if st.button("◀", key="latency_carousel_prev", use_container_width=True):
+            st.session_state["latency_carousel_idx"] = (
+                st.session_state["latency_carousel_idx"] - 1
+            ) % len(LATENCY_CAROUSEL_VIEWS)
+    with nav_next:
+        if st.button("▶", key="latency_carousel_next", use_container_width=True):
+            st.session_state["latency_carousel_idx"] = (
+                st.session_state["latency_carousel_idx"] + 1
+            ) % len(LATENCY_CAROUSEL_VIEWS)
+
+    current_view_key, current_view_label = LATENCY_CAROUSEL_VIEWS[
+        st.session_state["latency_carousel_idx"]
+    ]
+    with nav_title:
+        st.markdown(f"**{current_view_label}**")
+        st.caption(
+            f"View {st.session_state['latency_carousel_idx'] + 1} of "
+            f"{len(LATENCY_CAROUSEL_VIEWS)} — use ◀ ▶ to switch"
+        )
+
+    if current_view_key == "latency":
         st.plotly_chart(
             make_latency_chart(metrics_df, chart_h, selected_label=selected_label),
             use_container_width=False, config={"scrollZoom": True},
             key="chart_latency_line",
         )
+    else:
+        mesh_threshold_ms = st.number_input(
+            "Expected mesh-ping latency threshold (ms)",
+            min_value=1, max_value=1000, value=50,
+            key="mesh_carousel_threshold_ms",
+        )
+        mesh_df = load_mesh_ping_data(start_ts, end_ts, selected_server)
 
-with la2:
-    with st.container(border=True):
-        st.markdown("**🧩 App Metrics**")
-
-        app_summary_df = build_app_metrics_summary(app_metrics_df)
-
-        if app_summary_df.empty:
-            st.info("No app metric data available for the selected filters.")
-        else:
-            app_table_event = st.dataframe(
-                app_summary_df[["App Name", "Up %", "Down %"]],
-                use_container_width=True,
-                hide_index=True,
-                selection_mode="single-row",
-                on_select="rerun",
-                column_config={
-                    "App Name": st.column_config.TextColumn("Application"),
-                    "Up %": st.column_config.ProgressColumn(
-                        "Uptime", format="%.1f%%", min_value=0, max_value=100,
-                    ),
-                    "Down %": st.column_config.NumberColumn("Down %", format="%.2f%%"),
-                },
+        if mesh_df.empty:
+            st.info(f"No mesh ping data for {selected_label} in the selected range.")
+        elif current_view_key == "mesh_route":
+            st.plotly_chart(
+                make_mesh_route_chart(mesh_df, chart_h, mesh_threshold_ms),
+                use_container_width=False, config={"scrollZoom": True},
+                key="chart_mesh_route",
             )
-            st.caption("👆 Click a row to inspect failure samples")
+        else:
+            st.plotly_chart(
+                make_mesh_events_chart(mesh_df, chart_h, mesh_threshold_ms),
+                use_container_width=False, config={"scrollZoom": True},
+                key="chart_mesh_events",
+            )
 
-            selected_rows = app_table_event.selection.rows if app_table_event.selection else []
+# ---- App Metrics, stacked below Latency ----
 
-            if selected_rows:
-                selected_idx = selected_rows[0]
-                selected_app_name = app_summary_df.iloc[selected_idx]["App Name"]
-                selected_failure_count = int(app_summary_df.iloc[selected_idx]["Failure Count"])
+with st.container(border=True):
+    st.markdown("**🧩 App Metrics**")
 
-                if selected_failure_count > 0:
-                    failure_rows = app_metrics_df[
-                        (app_metrics_df["app_name"] == selected_app_name)
-                        & (app_metrics_df["status"].isin(["stopped", "error", "restarting"]))
-                    ].copy()
+    app_summary_df = build_app_metrics_summary(app_metrics_df)
 
-                    failure_rows = failure_rows.sort_values("ts", ascending=False)
+    if app_summary_df.empty:
+        st.info("No app metric data available for the selected filters.")
+    else:
+        app_table_event = st.dataframe(
+            app_summary_df[["App Name", "Up %", "Down %"]],
+            use_container_width=True,
+            hide_index=True,
+            selection_mode="single-row",
+            on_select="rerun",
+            column_config={
+                "App Name": st.column_config.TextColumn("Application"),
+                "Up %": st.column_config.ProgressColumn(
+                    "Uptime", format="%.1f%%", min_value=0, max_value=100,
+                ),
+                "Down %": st.column_config.NumberColumn("Down %", format="%.2f%%"),
+            },
+        )
+        st.caption("👆 Click a row to inspect failure samples")
 
-                    @st.dialog(f"Failure Details — {selected_app_name}")
-                    def show_failure_details():
-                        st.caption(
-                            "Detailed non-running app metric samples for the selected app."
-                        )
+        selected_rows = app_table_event.selection.rows if app_table_event.selection else []
 
-                        display_cols = [
-                            "ts",
-                            "app_name",
-                            "status",
-                            "cpu_pct",
-                            "rss_memory_mb",
-                            "process_count",
-                            "thread_count",
-                            "listening_sockets",
-                            "label",
-                            "hostname",
-                            "ip_address",
-                        ]
+        if selected_rows:
+            selected_idx = selected_rows[0]
+            selected_app_name = app_summary_df.iloc[selected_idx]["App Name"]
+            selected_failure_count = int(app_summary_df.iloc[selected_idx]["Failure Count"])
 
-                        existing_cols = [col for col in display_cols if col in failure_rows.columns]
+            if selected_failure_count > 0:
+                failure_rows = app_metrics_df[
+                    (app_metrics_df["app_name"] == selected_app_name)
+                    & (app_metrics_df["status"].isin(["stopped", "error", "restarting"]))
+                ].copy()
 
-                        st.dataframe(
-                            failure_rows[existing_cols],
-                            use_container_width=True,
-                            hide_index=True,
-                            column_config={
-                                "ts": st.column_config.DatetimeColumn("Timestamp"),
-                                "app_name": st.column_config.TextColumn("App Name"),
-                                "status": st.column_config.TextColumn("Status"),
-                                "cpu_pct": st.column_config.NumberColumn("CPU %", format="%.2f%%"),
-                                "rss_memory_mb": st.column_config.NumberColumn("RSS Memory (MB)", format="%.2f"),
-                                "process_count": st.column_config.NumberColumn("Processes"),
-                                "thread_count": st.column_config.NumberColumn("Threads"),
-                                "listening_sockets": st.column_config.NumberColumn("Listening Sockets"),
-                                "label": st.column_config.TextColumn("Machine"),
-                                "hostname": st.column_config.TextColumn("Hostname"),
-                                "ip_address": st.column_config.TextColumn("IP Address"),
-                            },
-                        )
+                failure_rows = failure_rows.sort_values("ts", ascending=False)
 
-                    show_failure_details()
-                else:
-                    st.success(f"No failures found for {selected_app_name}.")
+                @st.dialog(f"Failure Details — {selected_app_name}")
+                def show_failure_details():
+                    st.caption(
+                        "Detailed non-running app metric samples for the selected app."
+                    )
+
+                    display_cols = [
+                        "ts",
+                        "app_name",
+                        "status",
+                        "cpu_pct",
+                        "rss_memory_mb",
+                        "process_count",
+                        "thread_count",
+                        "listening_sockets",
+                        "label",
+                        "hostname",
+                        "ip_address",
+                    ]
+
+                    existing_cols = [col for col in display_cols if col in failure_rows.columns]
+
+                    st.dataframe(
+                        failure_rows[existing_cols],
+                        use_container_width=True,
+                        hide_index=True,
+                        column_config={
+                            "ts": st.column_config.DatetimeColumn("Timestamp"),
+                            "app_name": st.column_config.TextColumn("App Name"),
+                            "status": st.column_config.TextColumn("Status"),
+                            "cpu_pct": st.column_config.NumberColumn("CPU %", format="%.2f%%"),
+                            "rss_memory_mb": st.column_config.NumberColumn("RSS Memory (MB)", format="%.2f"),
+                            "process_count": st.column_config.NumberColumn("Processes"),
+                            "thread_count": st.column_config.NumberColumn("Threads"),
+                            "listening_sockets": st.column_config.NumberColumn("Listening Sockets"),
+                            "label": st.column_config.TextColumn("Machine"),
+                            "hostname": st.column_config.TextColumn("Hostname"),
+                            "ip_address": st.column_config.TextColumn("IP Address"),
+                        },
+                    )
+
+                show_failure_details()
+            else:
+                st.success(f"No failures found for {selected_app_name}.")
 
 # ===== Dynamic Registered Metrics =====
 
@@ -2054,7 +2312,9 @@ if not registry_df.empty:
 
 _section_header("📜 Detailed Records", f"Full history — {selected_label}")
 
-tab_metrics, tab_events, tab_apps = st.tabs(["📈 Metrics Log", "⚠️ Breach Events", "🧩 App Metrics"])
+tab_metrics, tab_events, tab_apps, tab_mesh = st.tabs(
+    ["📈 Metrics Log", "⚠️ Breach Events", "🧩 App Metrics", "🌐 Mesh Pings"]
+)
 
 with tab_metrics:
     if metrics_df.empty:
@@ -2179,6 +2439,38 @@ with tab_apps:
             file_name="app_metric_samples.csv",
             mime="text/csv",
             key="dl_apps",
+        )
+
+with tab_mesh:
+    mesh_records_df = load_mesh_ping_data(start_ts, end_ts, selected_server)
+
+    if mesh_records_df.empty:
+        st.info(f"No mesh ping results found for {selected_label} in the selected range.")
+    else:
+        mesh_show = mesh_records_df.sort_values("ts", ascending=False)
+
+        st.caption(f"{len(mesh_show):,} mesh ping records · {selected_label} (as source)")
+
+        st.dataframe(
+            mesh_show[["ts", "source_name", "target_name", "target_ip", "success", "latency_ms"]],
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "ts": st.column_config.DatetimeColumn("Timestamp", format="YYYY-MM-DD HH:mm:ss"),
+                "source_name": st.column_config.TextColumn("Source"),
+                "target_name": st.column_config.TextColumn("Target"),
+                "target_ip": st.column_config.TextColumn("Target IP"),
+                "success": st.column_config.CheckboxColumn("Success"),
+                "latency_ms": st.column_config.NumberColumn("Latency (ms)", format="%.2f"),
+            },
+        )
+
+        st.download_button(
+            "⬇️ Download CSV",
+            data=mesh_show.to_csv(index=False).encode("utf-8"),
+            file_name="mesh_ping_results.csv",
+            mime="text/csv",
+            key="dl_mesh",
         )
 
 st.caption(f"Lab Health Dashboard · PostgreSQL · rendered {datetime.now():%Y-%m-%d %H:%M:%S}")
