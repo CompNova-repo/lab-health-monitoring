@@ -9,8 +9,8 @@ Layout:
   KPI Summary            — CPU, RAM, Disk, Latency current value + donut charts
   KPI Trends             — CPU %, RAM %, Disk % time-series (3 columns)
   Latency & App Metrics  — Latency card is a 3-view carousel (◀ ▶ arrows):
-                            Net & Disk latency → Mesh ping avg latency by
-                            route → Mesh ping breach/failure events. All
+                            Net & Disk latency → Mesh ping summary table →
+                            Mesh ping avg latency by route. All
                             three follow the sidebar's selected machine
                             (as mesh ping source) and date range. App
                             Metrics (uptime table) sits stacked below.
@@ -53,7 +53,6 @@ st.set_page_config(
 )
 
 
-<<<<<<< Updated upstream
 # --- Inline Mesh Ping Results Dashboard ---
 def render_mesh_ping_results_dashboard():
     import os
@@ -570,13 +569,6 @@ if dashboard_page == "Mesh Ping":
     st.stop()
 # --- End Mesh Ping page switcher ---
 
-
-
-
-
-
-=======
->>>>>>> Stashed changes
 # ---------------------------------------------------------------------------
 # Global styling
 # ---------------------------------------------------------------------------
@@ -654,19 +646,11 @@ with header_r:
 # ---------------------------------------------------------------------------
 
 PG_KWARGS = {
-<<<<<<< Updated upstream
     "host": "localhost",
     "port": 5432,
     "user": "release_user",
     "password": os.getenv("P1_DB_PASSWORD", os.getenv("DB_PASSWORD", "release_password")),
     "dbname": "lab_monitoring_db",
-=======
-    "host": os.getenv("P1_DB_HOST", os.getenv("DB_HOST", "127.0.0.1")),
-    "port": int(os.getenv("P1_DB_PORT", os.getenv("DB_PORT", "5432"))),
-    "user": os.getenv("P1_DB_USER", os.getenv("DB_USER", "release_user")),
-    "password": os.getenv("P1_DB_PASSWORD", os.getenv("DB_PASSWORD", "")),
-    "dbname": os.getenv("P1_DB_NAME", os.getenv("DB_NAME", "lab_monitoring_db")),
->>>>>>> Stashed changes
 }
 
 
@@ -1667,57 +1651,105 @@ def make_mesh_route_chart(mesh_df: pd.DataFrame, height: int, threshold_ms: floa
     return fig
 
 
-def make_mesh_events_chart(mesh_df: pd.DataFrame, height: int, threshold_ms: float) -> go.Figure:
-    """Per-ping mesh latency over time for the selected source machine, breaches/failures highlighted."""
+def build_mesh_ping_summary(mesh_df: pd.DataFrame, threshold_ms: float) -> pd.DataFrame:
+    """Summarize mesh ping results for the selected source machine and date range."""
     if mesh_df.empty:
-        return _make_empty_fig()
+        return pd.DataFrame()
 
-    status_df = _annotate_mesh_status(mesh_df, threshold_ms)
+    summary_source_df = mesh_df.dropna(subset=["source_name", "target_name"]).copy()
+    summary_source_df["source_name"] = summary_source_df["source_name"].astype(str).str.strip()
+    summary_source_df["target_name"] = summary_source_df["target_name"].astype(str).str.strip()
+    summary_source_df["latency_ms"] = pd.to_numeric(summary_source_df["latency_ms"], errors="coerce")
+    summary_source_df = summary_source_df[
+        (summary_source_df["source_name"] != "")
+        & (summary_source_df["target_name"] != "")
+    ].copy()
 
-    normal_points = status_df[status_df["status"] == "NORMAL"]
-    breach_points = status_df[status_df["status"] == "BREACH"]
-    failed_points = status_df[status_df["status"] == "FAILED"].copy()
+    if summary_source_df.empty:
+        return pd.DataFrame()
 
-    fig = go.Figure()
-
-    if not normal_points.empty:
-        fig.add_trace(go.Scatter(
-            x=normal_points["ts"], y=normal_points["latency_ms"],
-            mode="markers", name="Normal ping",
-            marker=dict(size=7, color="#60a5fa", opacity=0.35),
-            customdata=normal_points[["target_name"]],
-            hovertemplate="Time: %{x}<br>Target: %{customdata[0]}<br>Latency: %{y:.2f} ms<extra></extra>",
-        ))
-    if not breach_points.empty:
-        fig.add_trace(go.Scatter(
-            x=breach_points["ts"], y=breach_points["latency_ms"],
-            mode="markers", name="Latency breach",
-            marker=dict(size=12, color="red"),
-            customdata=breach_points[["target_name"]],
-            hovertemplate="Time: %{x}<br>Target: %{customdata[0]}<br>Latency: %{y:.2f} ms<extra></extra>",
-        ))
-    if not failed_points.empty:
-        failed_points["plot_latency"] = threshold_ms
-        fig.add_trace(go.Scatter(
-            x=failed_points["ts"], y=failed_points["plot_latency"],
-            mode="markers", name="Failed ping",
-            marker=dict(size=13, color="red", symbol="x"),
-            customdata=failed_points[["target_name"]],
-            hovertemplate="Time: %{x}<br>Target: %{customdata[0]}<br>Status: FAILED<extra></extra>",
-        ))
-
-    if not fig.data:
-        fig.add_annotation(text="No mesh ping data", xref="paper", yref="paper", x=0.5, y=0.5, showarrow=False)
-
-    fig.add_hline(
-        y=threshold_ms, line_dash="dash", opacity=0.45,
-        annotation_text=f"Expected latency: {threshold_ms:g} ms",
+    summary_df = (
+        summary_source_df.groupby(["source_name", "target_name"])
+        .agg(
+            breach_count=("latency_ms", lambda s: int((s > threshold_ms).sum())),
+            total_runs=("latency_ms", "count"),
+        )
+        .reset_index()
     )
-    fig.update_layout(
-        template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+    summary_df = summary_df[summary_df["total_runs"] > 0].copy()
+    if summary_df.empty:
+        return pd.DataFrame()
+
+    summary_df["breach_pct"] = (
+        summary_df["breach_count"] / summary_df["total_runs"] * 100
+    ).round(2)
+    return summary_df.sort_values("breach_pct", ascending=False).reset_index(drop=True)
+
+
+def render_mesh_ping_summary_table(
+    mesh_df: pd.DataFrame,
+    threshold_ms: float,
+    selected_label: str,
+) -> None:
+    summary_df = build_mesh_ping_summary(mesh_df, threshold_ms)
+
+    if summary_df.empty:
+        st.info(f"No mesh ping summary data for {selected_label} in the selected range.")
+        return
+
+    st.subheader("Mesh Ping Summary")
+    st.caption(
+        f"Threshold: {threshold_ms:g} ms · "
+        f"{len(mesh_df):,} records · {selected_label} as source"
     )
-    _apply_scroll_layout(fig, height, "Latency (ms)", show_legend=True)
-    return fig
+
+    table_df = summary_df[
+        [
+            "source_name",
+            "target_name",
+            "breach_pct",
+            "breach_count",
+            "total_runs",
+        ]
+    ].copy()
+
+    def _color_breach_pct(val):
+        if val > 50:
+            return "color: #ff4b4b; font-weight: 700"
+        if val > 20:
+            return "color: #ffa500; font-weight: 600"
+        if val > 0:
+            return "color: #f0e68c; font-weight: 600"
+        return "color: #4caf50; font-weight: 600"
+
+    styled_table = table_df.style.format(
+        {
+            "breach_count": "{:.0f}",
+            "total_runs": "{:.0f}",
+        }
+    ).map(_color_breach_pct, subset=["breach_pct"])
+
+    table_height = min(max((len(table_df) + 1) * 35 + 3, 110), 420)
+
+    st.dataframe(
+        styled_table,
+        use_container_width=True,
+        hide_index=True,
+        height=table_height,
+        column_config={
+            "source_name": st.column_config.TextColumn("Host Machine Alias", width="medium"),
+            "target_name": st.column_config.TextColumn("Target Machine Alias", width="medium"),
+            "breach_pct": st.column_config.ProgressColumn(
+                "Threshold Breach %",
+                format="%.2f%%",
+                min_value=0,
+                max_value=100,
+                width="large",
+            ),
+            "breach_count": st.column_config.NumberColumn("Threshold Breaches", format="%d"),
+            "total_runs": st.column_config.NumberColumn("Total Runs", format="%d"),
+        },
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -2111,8 +2143,8 @@ _section_header("Latency & Application Health", selected_label)
 
 LATENCY_CAROUSEL_VIEWS = [
     ("latency", "📶 Latency (Net & Disk)"),
+    ("mesh_summary", "🌐 Mesh Ping Summary"),
     ("mesh_route", "🌐 Mesh Ping — Avg Latency by Route"),
-    ("mesh_events", "🌐 Mesh Ping — Breach & Failure Events"),
 ]
 
 if "latency_carousel_idx" not in st.session_state:
@@ -2157,17 +2189,17 @@ with st.container(border=True):
 
         if mesh_df.empty:
             st.info(f"No mesh ping data for {selected_label} in the selected range.")
-        elif current_view_key == "mesh_route":
-            st.plotly_chart(
-                make_mesh_route_chart(mesh_df, chart_h, mesh_threshold_ms),
-                use_container_width=False, config={"scrollZoom": True},
-                key="chart_mesh_route",
+        elif current_view_key == "mesh_summary":
+            render_mesh_ping_summary_table(
+                mesh_df,
+                mesh_threshold_ms,
+                selected_label,
             )
         else:
             st.plotly_chart(
-                make_mesh_events_chart(mesh_df, chart_h, mesh_threshold_ms),
-                use_container_width=False, config={"scrollZoom": True},
-                key="chart_mesh_events",
+                make_mesh_route_chart(mesh_df, chart_h, mesh_threshold_ms),
+                use_container_width=True, config={"scrollZoom": True},
+                key="chart_mesh_route",
             )
 
 # ---- App Metrics, stacked below Latency ----
@@ -2474,4 +2506,3 @@ with tab_mesh:
         )
 
 st.caption(f"Lab Health Dashboard · PostgreSQL · rendered {datetime.now():%Y-%m-%d %H:%M:%S}")
-
