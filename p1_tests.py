@@ -262,3 +262,58 @@ class TestCmdRun:
         assert output["mode"] == "standard"
         assert "test-vm" in output["processed_machines"]
         assert output["db_write_ok"] is True
+
+    @patch('p1_fixed.load_machines_from_db')
+    @patch('p1_fixed.load_custom_metrics')
+    @patch('p1_fixed.load_state')
+    @patch('p1_fixed.evaluate_machine')
+    @patch('p1_fixed.collect_mesh_ping_from')
+    @patch('p1_fixed.persist_to_db')
+    def test_cmd_run_mesh_uses_only_successfully_evaluated_peers(
+        self, mock_persist, mock_mesh, mock_eval, mock_state, mock_custom, mock_load_machines, capsys
+    ):
+        aliases = ["peer-a", "peer-b", "ssh-failed"]
+        mock_load_machines.return_value = (
+            {
+                alias: {
+                    "thresholds": {}, "package_checks": [], "apps": [],
+                    "packages": [], "network_checks": [], "top_n": 5,
+                    "disk_device": None, "network_interface": None,
+                }
+                for alias in aliases
+            },
+            {
+                "peer-a": {"host": "10.0.0.1", "port": "22", "user": "u", "ssh_key": "k"},
+                "peer-b": {"host": "10.0.0.2", "port": "22", "user": "u", "ssh_key": "k"},
+                "ssh-failed": {"host": "10.0.0.3", "port": "22", "user": "u", "ssh_key": "k"},
+            },
+        )
+        mock_custom.return_value = {}
+        mock_state.return_value = {alias: {"install_state": "NORMAL", "breach_counters": {}} for alias in aliases}
+
+        def eval_side_effect(alias, *args, **kwargs):
+            status = "ssh_error" if alias == "ssh-failed" else "ok"
+            record = {
+                "alias": alias, "ts": "2026-07-21T00:00:00Z", "mode": "standard",
+                "status": status, "inventory": {"ip_address": f"10.0.0.{1 if alias == 'peer-a' else 2 if alias == 'peer-b' else 3}"},
+                "stats": {}, "custom_metrics": [], "service_status": {}, "app_metrics": [],
+                "packages": [], "network_checks": [], "network_summary": None,
+                "log_summary": None, "log_window_seconds": None, "top_processes": ([], []),
+                "alerts": [], "machine_state": {"install_state": "NORMAL", "breach_counters": {}},
+            }
+            return record["machine_state"], [], record
+
+        mock_eval.side_effect = eval_side_effect
+        mock_mesh.side_effect = lambda _ssh_target, targets: [
+            {"target_alias": t["alias"], "target_ip": t["ip"], "success": True, "latency_ms": 1.2}
+            for t in targets
+        ]
+        mock_persist.return_value = (True, None, [])
+
+        p1_fixed.cmd_run("standard")
+
+        _records, _custom_cfg = mock_persist.call_args.args[:2]
+        mesh_results = mock_persist.call_args.kwargs["mesh_ping_results"]
+        routes = {(r["source_alias"], r["target_alias"]) for r in mesh_results}
+        assert routes == {("peer-a", "peer-b"), ("peer-b", "peer-a")}
+        assert len(mesh_results) == 2
