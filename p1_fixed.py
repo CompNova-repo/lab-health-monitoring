@@ -36,12 +36,6 @@ try:
 except ImportError:
     PSYCOPG2_AVAILABLE = False
 
-try:
-    import mesh_ping
-    MESH_PING_AVAILABLE = True
-except Exception:
-    MESH_PING_AVAILABLE = False
-
 ROOT = os.getcwd()
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -80,7 +74,6 @@ DB_DSN = {
     "password": os.environ.get("P1_DB_PASSWORD", "release_password"),
     "connect_timeout": 5,
 }
-
 
 # Metrics: ram/disk/cpu/swap/load-avg/process-count + systemd failed units.
 REMOTE_STATS_CMD = (
@@ -754,6 +747,32 @@ def collect_gateway_ping(target, fallback_target=None):
     sys.stderr.write(f"[p1_helper] gateway ping: latency={latency}ms loss={loss}%\n")
     return {"net_latency_ms": latency, "packet_loss_pct": loss}, None
 
+def collect_mesh_ping_from(target, targets_to_ping):
+    results = []
+    for entry in targets_to_ping:
+        tgt_ip = entry["ip"]
+        remote_cmd = f"ping -c 3 -W 2 {tgt_ip} 2>&1"
+        ok, out, err = ssh_run(target, remote_cmd, timeout=15)
+
+        loss_m = re.search(r"(\d+(?:\.\d+)?)% packet loss", out) if out else None
+        rtt_m = re.search(r"= [\d.]+/([\d.]+)/", out) if out else None
+
+        if loss_m:
+            packet_loss = to_float(loss_m.group(1))
+            latency_ms = to_float(rtt_m.group(1)) if rtt_m else None
+            success = packet_loss is not None and packet_loss < 100
+        else:
+            success = False
+            latency_ms = None
+
+        results.append({
+            "target_alias": entry["alias"],
+            "target_ip": tgt_ip,
+            "success": success,
+            "latency_ms": latency_ms,
+        })
+    return results
+
 # ---------------------------------------------------------------------------
 # Postgres writes
 # ---------------------------------------------------------------------------
@@ -793,20 +812,6 @@ def db_ensure_schema(conn):
                 created_at TIMESTAMPTZ DEFAULT now()
             );
         """)
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS mesh_ping_results (
-                id SERIAL PRIMARY KEY,
-                ts TIMESTAMPTZ NOT NULL DEFAULT now(),
-                source_server_id UUID NOT NULL,
-                source_alias TEXT,
-                target_server_id UUID NOT NULL,
-                target_alias TEXT,
-                target_ip TEXT,
-                success BOOLEAN NOT NULL,
-                latency_ms DOUBLE PRECISION
-            );
-        """)
-
 def _get_command_text(cfg):
     """Extract the command text from a custom_metrics_cfg entry."""
     if isinstance(cfg, str):
@@ -999,19 +1004,24 @@ def db_write_top_processes(conn, server_id, sample_id, ts, top_cpu, top_mem):
                 cur.execute("INSERT INTO top_processes (sample_id, server_id, ts, rank_by, rank_position, pid, process_name, cpu_pct, mem_pct, mem_mb) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)", (sample_id, server_id, ts, rank_by, r["rank_position"], r.get("pid"), r.get("process_name"), r.get("cpu_pct"), r.get("mem_pct"), r.get("mem_mb")))
 
 
-def db_write_mesh_ping_results(conn, results, ts=None):
-    """Write mesh ping results into the mesh_ping_results table."""
-    if not results:
-        return
-    if ts is None:
-        ts = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+def db_write_mesh_ping_results(conn, alias_to_server_id, mesh_results):
+    if not mesh_results:
+        return 0
+    inserted = 0
     with conn.cursor() as cur:
-        for r in results:
+        for r in mesh_results:
+            source_alias = r.get("source_alias")
+            target_alias = r.get("target_alias")
+            source_id = alias_to_server_id.get(source_alias)
+            target_id = alias_to_server_id.get(target_alias)
+            if not source_id or not target_id:
+                continue
             cur.execute(
-                "INSERT INTO mesh_ping_results (ts, source_server_id, source_alias, target_server_id, target_alias, target_ip, success, latency_ms) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
-                (ts, r.get("source_server_id"), r.get("source_alias"), r.get("target_server_id"), r.get("target_alias"), r.get("target_ip"), r.get("success"), r.get("latency_ms"))
+                "INSERT INTO mesh_ping_results (source_server_id, source_alias, target_server_id, target_alias, target_ip, success, latency_ms) VALUES (%s, %s, %s, %s, %s, %s, %s)",
+                (source_id, source_alias, target_id, target_alias, r.get("target_ip"), r.get("success", False), r.get("latency_ms")),
             )
-
+            inserted += 1
+    return inserted
 
 # ---------------------------------------------------------------------------
 # App commands (from headless_add_app.py registry)
@@ -1206,23 +1216,6 @@ def collect_app_commands_remote(target):
     return results
 
 
-def collect_mesh_ping():
-    """Run mesh ping across all monitored machines. Returns (results, error).
-
-    The underlying mesh_ping module builds its own DB DSN from env vars/hardcoded
-    defaults, so no DSN needs to be passed here.
-    """
-    if not MESH_PING_AVAILABLE:
-        return [], "mesh_ping module not available (requires asyncssh + asyncpg)"
-    try:
-        results = mesh_ping.run_sync()
-        return results, None
-    except Exception as e:
-        error_msg = str(e)
-        sys.stderr.write(f"[p1_helper] mesh_ping collection failed: {error_msg}\n")
-        return [], error_msg
-
-
 def persist_to_db(per_machine_records, custom_metrics_cfg, mesh_ping_results=None):
     conn, err = db_connect()
     if conn is None: return False, err, [r["alias"] for r in per_machine_records]
@@ -1235,10 +1228,12 @@ def persist_to_db(per_machine_records, custom_metrics_cfg, mesh_ping_results=Non
         sys.stderr.write(f"[p1_helper] Failed to ensure schema/sync registry: {e}\n")
 
     failed_aliases = []; last_err = None
+    alias_to_server_id = {}
     try:
         for rec in per_machine_records:
             try:
                 server_id = db_ensure_machine(conn, rec["alias"], rec.get("inventory"))
+                alias_to_server_id[rec["alias"]] = server_id
                 db_write_machine_state(conn, server_id, rec["machine_state"])
 
                 sample_id = None
@@ -1261,12 +1256,7 @@ def persist_to_db(per_machine_records, custom_metrics_cfg, mesh_ping_results=Non
                 sys.stderr.write(f"[p1_helper] Postgres write failed for {rec['alias']}: {e}\n")
                 continue
 
-        # Write mesh ping results after all per-machine data
-        if mesh_ping_results:
-            try:
-                db_write_mesh_ping_results(conn, mesh_ping_results)
-            except Exception as e:
-                sys.stderr.write(f"[p1_helper] mesh_ping DB write failed: {e}\n")
+        db_write_mesh_ping_results(conn, alias_to_server_id, mesh_ping_results)
 
         if failed_aliases: return False, last_err, failed_aliases
         return True, None, []
@@ -1460,13 +1450,35 @@ def cmd_run(mode):
     if mode == "highfreq" and not processed_machines:
         print(json.dumps({"skipped": True, "reason": "no machines in INSTALLING state", "mode": mode})); return
 
-    # Collect mesh ping results in standard mode (cross-machine network health)
-    mesh_ping_results = None
-    mesh_ping_error = None
-    if mode == "standard":
-        mesh_ping_results, mesh_ping_error = collect_mesh_ping()
+    # Collect mesh ping results between machines that completed SSH-backed evaluation.
+    # If a peer is reachable over SSH but ICMP fails, the row is still written with
+    # success=false and latency_ms=NULL.
+    all_mesh_results = []
+    mesh_targets = []
+    mesh_peer_records = [rec for rec in db_records if rec["status"] != "ssh_error"]
+    for rec in mesh_peer_records:
+        inv = rec.get("inventory")
+        ip = (inv.get("ip_address") if inv else None) or ssh_targets.get(rec["alias"], {}).get("host")
+        if ip:
+            mesh_targets.append({"alias": rec["alias"], "ip": ip})
 
-    db_ok, db_err, db_failed_aliases = persist_to_db(db_records, custom_metrics_cfg, mesh_ping_results)
+    if mesh_targets:
+        for rec in mesh_peer_records:
+            source_alias = rec["alias"]
+            ssh_target = ssh_targets.get(source_alias)
+            if not ssh_target:
+                continue
+            targets_to_ping = [t for t in mesh_targets if t["alias"] != source_alias]
+            if not targets_to_ping:
+                continue
+            ping_results = collect_mesh_ping_from(ssh_target, targets_to_ping)
+            for pr in ping_results:
+                all_mesh_results.append({
+                    "source_alias": source_alias,
+                    **pr,
+                })
+
+    db_ok, db_err, db_failed_aliases = persist_to_db(db_records, custom_metrics_cfg, mesh_ping_results=all_mesh_results)
     if not db_ok: sys.stderr.write(f"[p1_helper] Postgres write FAILED for {db_failed_aliases}: {db_err}\n")
 
     db_status_text = "OK" if db_ok else (f"PARTIAL FAILURE ({', '.join(db_failed_aliases)}) - {db_err}" if db_failed_aliases and len(db_failed_aliases) < len(db_records) else f"FAILED - {db_err}")
@@ -1474,12 +1486,8 @@ def cmd_run(mode):
     result = {
         "mode": mode, "processed_machines": processed_machines, "skipped_machines": skipped_machines,
         "new_system_state": new_state, "alerts": all_alerts, "db_write_ok": db_ok, "db_write_error": db_err,
-        "db_write_failed_machines": db_failed_aliases,
-        "mesh_ping": {
-            "results_count": len(mesh_ping_results) if mesh_ping_results else 0,
-            "error": mesh_ping_error,
-        } if mode == "standard" else None,
-        "summary": f"Processed {len(processed_machines)} machine(s) in {mode} mode." + (f" Mesh ping: {len(mesh_ping_results)} results." if mesh_ping_results else "") + f" {len(all_alerts)} alert(s) fired. Postgres write: {db_status_text}." + (" ALERTS: " + "; ".join(a["message"] for a in all_alerts) if all_alerts else ""),
+        "db_write_failed_machines": db_failed_aliases, "mesh_ping_results_collected": len(all_mesh_results),
+        "summary": f"Processed {len(processed_machines)} machine(s) in {mode} mode. {len(all_alerts)} alert(s) fired. Postgres write: {db_status_text}." + (" ALERTS: " + "; ".join(a["message"] for a in all_alerts) if all_alerts else ""),
     }
     if mode == "highfreq": result["note"] = "If new_system_state shows no machines still INSTALLING, this high-freq job will be a no-op."
 
