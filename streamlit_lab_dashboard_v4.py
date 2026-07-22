@@ -557,18 +557,6 @@ def render_mesh_ping_results_dashboard():
     )
 # --- End Inline Mesh Ping Results Dashboard ---
 
-# --- Mesh Ping page switcher ---
-dashboard_page = st.sidebar.radio(
-    "Dashboard section",
-    ["Main Dashboard", "Mesh Ping"],
-    index=0,
-)
-
-if dashboard_page == "Mesh Ping":
-    render_mesh_ping_results_dashboard()
-    st.stop()
-# --- End Mesh Ping page switcher ---
-
 # ---------------------------------------------------------------------------
 # Global styling
 # ---------------------------------------------------------------------------
