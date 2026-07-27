@@ -1,5 +1,5 @@
 machines:
-  gcp_testing:
+  gcp_14_july:
     thresholds:
       ram: 90
       disk: 85
