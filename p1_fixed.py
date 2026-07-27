@@ -486,7 +486,7 @@ def collect_app_metrics(target, apps):
         name = app.get("name"); pattern = app.get("pattern")
         if not name or not pattern: continue
         remote_cmd = (
-            f"PIDS=$(pgrep -f '{pattern}'); "
+            f"PIDS=$(pgrep '{pattern}'); "
             "if [ -z \"$PIDS\" ]; then echo 'NOPIDS'; else "
             "echo \"$PIDS\" | tr '\\n' ' '; echo; "
             "ps -o pcpu=,rss=,pmem= -p $(echo \"$PIDS\" | tr '\\n' ',' | sed 's/,$//'); "
@@ -498,7 +498,7 @@ def collect_app_metrics(target, apps):
             results.append({
                 "app_name": name, "cpu_pct": None, "rss_memory_mb": None,
                 "process_count": 0, "thread_count": None, "listening_sockets": None,
-                "status": "stopped" if ok else "error",
+                "status": "not_installed" if ok else "error",
             })
             continue
 
@@ -1406,6 +1406,28 @@ def load_machines_from_db():
                     "user": r["ssh_user"],
                     "ssh_key": r["ssh_key_path"],
                 }
+
+        # Merge monitor_config.yaml over DB defaults (apps, thresholds, packages, etc.)
+        try:
+            yaml_cfg, _ = load_monitor_config()
+            for alias, yaml_entry in yaml_cfg.items():
+                if alias in monitor_cfg:
+                    cfg = monitor_cfg[alias]
+                    for key in ("thresholds", "package_checks", "apps", "packages", "network_checks"):
+                        yaml_val = yaml_entry.get(key)
+                        if yaml_val:
+                            if isinstance(cfg.get(key), dict) and isinstance(yaml_val, dict):
+                                cfg[key].update(yaml_val)
+                            elif isinstance(cfg.get(key), list) and isinstance(yaml_val, list):
+                                cfg[key] = list(yaml_val)
+                    if yaml_entry.get("top_n") is not None:
+                        cfg["top_n"] = yaml_entry["top_n"]
+                    if yaml_entry.get("disk_device"):
+                        cfg["disk_device"] = yaml_entry["disk_device"]
+                    if yaml_entry.get("network_interface"):
+                        cfg["network_interface"] = yaml_entry["network_interface"]
+        except Exception as e:
+            sys.stderr.write(f"[p1_helper] Failed to load/merge monitor_config.yaml: {e}\n")
 
         return monitor_cfg, ssh_targets
 

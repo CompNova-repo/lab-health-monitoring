@@ -8,7 +8,7 @@ machines:
       warning_count: 200
     package_checks:
       - sshd
-    apps:
+    apps: 
       - name: postgres
         pattern: postgresql
     packages:
