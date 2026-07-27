@@ -109,11 +109,9 @@ MONITOR_CONFIG = os.path.join(ROOT, "monitor_config.yaml")
 STATE_FILE = os.path.join(ROOT, "system_state.json")
 METRIC_REGISTRY_FILE = os.path.join(ROOT, "metric_registry.yaml")
 
-from pathlib import Path
 from dotenv import load_dotenv
 
-ROOT = Path(__file__).resolve().parent.parent
-load_dotenv(ROOT / ".env")
+load_dotenv(os.path.join(ROOT, ".env"))
 
 DB_DSN = {
     "host": os.environ.get("P1_DB_HOST", "localhost"),
@@ -133,7 +131,21 @@ REMOTE_STATS_CMD = (
     "echo '---DISK---'; "
     "df -P / | awk 'NR==2 {gsub(\"%\",\"\",$5); print $5}'; "
     "echo '---CPU---'; "
-    "top -bn1 | awk '/Cpu\\(s\\)/ {print 100 - $8}'; "
+    # Extract the idle % by matching the number immediately before the "id"
+    # label (optionally comma/percent-glued to it), rather than indexing a
+    # fixed awk field. `top` right-justifies each field to a fixed width, so
+    # whenever idle hits a 3-digit value (100.0 - which a quiet/idle box hits
+    # often) the preceding comma loses its separating space and two fields
+    # merge into one (e.g. "ni,100.0"), shifting every later field left by
+    # one - a fixed $8 lookup then silently reads the wrong field and can
+    # report the exact opposite of the real value. This regex anchors on
+    # what immediately follows the number ("id") instead, which stays intact
+    # regardless of that glueing, and works across both '%id' (RHEL-style)
+    # and ' id' (Debian/procps-ng) formats. A non-match falls through
+    # unparsed and is dropped by to_float() (null), never a wrong number.
+    "top -bn1 | grep 'Cpu(s)' | "
+    "sed -E 's/.*[^0-9]([0-9]+\\.[0-9]+)%? *id.*/\\1/' | "
+    "awk '{print 100 - $1}'; "
     "echo '---LOAD---'; "
     "cat /proc/loadavg | awk '{print $1, $2, $3}'; "
     "echo '---PROCS---'; "
