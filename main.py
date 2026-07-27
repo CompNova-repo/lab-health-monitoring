@@ -15,10 +15,12 @@ This script:
   1. Resolves the metric name to a shell command (from --command or the catalog).
   2. Loads ALL active machines from the machines table and tries each one via SSH
      until one succeeds (gracefully skipping unreachable machines).
-  3. Writes a plugin script into new-metrics/<key>.py that can execute the command
+  3. Writes a pending plugin script and executes that script on the validation
+     machine to verify its JSON contract and parser.
+  4. Writes a plugin script into new-metrics/<key>.py that can execute the command
      and return {"value": ..., "status": ..., "raw_output": ...}.
-  4. Appends the metric to metric_registry.yaml.
-  5. Adds a dynamic column to metric_samples in PostgreSQL.
+  5. Appends the metric to metric_registry.yaml.
+  6. Adds a dynamic column to metric_samples in PostgreSQL.
 
 Hermes should NEVER edit this file to add new metrics — use --command instead.
 """
@@ -36,6 +38,11 @@ try:
     from psycopg2 import sql
 except ImportError:
     psycopg2 = None
+
+try:
+    import yaml
+except ImportError:
+    yaml = None
 
 
 ROOT = Path(__file__).resolve().parent
@@ -99,6 +106,19 @@ METRIC_ALIASES = {
 
 _SAFE_COLUMN_RE = re.compile(r"^[a-z][a-z0-9_]{0,62}$")
 _ALLOWED_DB_TYPES = {"DOUBLE PRECISION", "INTEGER", "BIGINT", "TEXT", "BOOLEAN"}
+_FALLBACK_ZERO_RE = re.compile(
+    r"(\|\||;|&&)\s*(echo|printf)\s+['\"]?0(?:\.0+)?['\"]?(?:\s|$)"
+)
+_SUPPRESS_FAILURE_RE = re.compile(r"(\|\||;|&&)\s*(true|:)(?:\s|$)")
+
+CPU_TEMPERATURE_COMMAND = (
+    "for f in /sys/class/thermal/thermal_zone*/temp /sys/class/hwmon/hwmon*/temp*_input; "
+    "do [ -r \"$f\" ] || continue; v=$(cat \"$f\") || continue; "
+    "case \"$v\" in ''|*[!0-9.-]*) continue;; esac; "
+    "awk -v v=\"$v\" 'BEGIN { if (v > 1000) v = v / 1000; "
+    "if (v > 0 && v <= 130) { print v; exit 0 } exit 1 }' && exit 0; "
+    "done; echo 'cpu temperature sensor not found' >&2; exit 1"
+)
 
 
 # ---------------------------------------------------------------------------
@@ -138,7 +158,7 @@ def get_all_machines_from_db(conn):
         cur.execute("""
             SELECT
                 alias,
-                COALESCE(host(ip_address), hostname) AS connection_host,
+                host(ip_address) AS ip_address,
                 COALESCE(ssh_port, 22) AS ssh_port,
                 ssh_user,
                 ssh_key_path
@@ -150,12 +170,13 @@ def get_all_machines_from_db(conn):
 
     machines = []
     for row in rows:
-        alias, host, ssh_port, ssh_user, ssh_key_path = row
-        if not host or not ssh_user or not ssh_key_path:
+        alias, ip_address, ssh_port, ssh_user, ssh_key_path = row
+        if not ip_address or not ssh_user or not ssh_key_path:
             continue
         machines.append({
             "alias": alias,
-            "host": host,
+            "host": ip_address,
+            "host_source": "ip_address",
             "port": ssh_port or 22,
             "user": ssh_user,
             "ssh_key": os.path.expanduser(ssh_key_path),
@@ -188,33 +209,88 @@ def parse_first_float(text):
     return float(match.group()) if match else None
 
 
-def validate_command_on_machines(metric_key, command, machines):
+def is_temperature_metric(metric_key, meta):
+    fields = " ".join([
+        metric_key or "",
+        str(meta.get("display_name", "")),
+        str(meta.get("unit", "")),
+    ]).lower()
+    return "temp" in fields or "temperature" in fields
+
+
+def validate_command_definition(metric_key, meta):
+    """Reject commands that can hide unsupported metrics behind fake values."""
+    command = str(meta.get("command", ""))
+    compact = " ".join(command.split())
+
+    if _FALLBACK_ZERO_RE.search(compact):
+        raise RuntimeError(
+            "Metric command must not use a fallback like '|| echo 0'. "
+            "If the metric source is unavailable, the command must exit non-zero."
+        )
+    if _SUPPRESS_FAILURE_RE.search(compact):
+        raise RuntimeError(
+            "Metric command must not suppress collection failures with 'true' or ':'. "
+            "Unavailable metric sources must exit non-zero."
+        )
+    if is_temperature_metric(metric_key, meta) and "/proc/cpuinfo" in compact:
+        raise RuntimeError(
+            "CPU temperature must not be collected from /proc/cpuinfo. Use kernel "
+            "thermal or hwmon sensor files under /sys/class instead."
+        )
+
+
+def validate_metric_value(metric_key, meta, value, raw_output):
+    if not is_temperature_metric(metric_key, meta):
+        return
+    if value <= 0 or value > 130:
+        raise RuntimeError(
+            f"Temperature metric returned implausible value {value!r}. "
+            f"Raw output: {str(raw_output)[:200]}"
+        )
+
+
+def validate_command_on_machines(metric_key, meta, machines):
     """
     Try to validate `command` against every machine in the list.
     Return the first successful validation result.
     If all fail, raise with a summary.
     """
     errors = []
+    command = meta["command"]
     for machine in machines:
+        machine_label = f"{machine['alias']} ({machine['host_source']}={machine['host']})"
         ok, stdout, stderr = ssh_run(machine, command, timeout=15)
 
         if not ok:
-            errors.append(f"{machine['alias']}: SSH returned non-zero or failed ({stderr[:100]})")
+            errors.append(
+                f"{machine_label}: SSH returned non-zero or failed ({stderr[:100]})"
+            )
             continue
 
         value = parse_first_float(stdout)
 
         if value is None:
-            errors.append(f"{machine['alias']}: Could not parse numeric value from: {stdout[:100]}")
+            errors.append(
+                f"{machine_label}: Could not parse numeric value from: {stdout[:100]}"
+            )
+            continue
+        try:
+            validate_metric_value(metric_key, meta, value, stdout)
+        except RuntimeError as e:
+            errors.append(f"{machine_label}: {e}")
             continue
 
-        # Successfully validated on this machine
+        # Successfully validated on this machine.
         return {
             "status": "ok",
             "metric_key": metric_key,
             "value": value,
             "raw_output": stdout,
             "machine": machine["alias"],
+            "machine_config": machine,
+            "host": machine["host"],
+            "host_source": machine["host_source"],
         }
 
     # All machines failed
@@ -231,13 +307,97 @@ def validate_command_on_machines(metric_key, command, machines):
 # ---------------------------------------------------------------------------
 
 
+def validate_generated_script_on_machine(script_path, machine, metric_key, meta, timeout=20):
+    """
+    Execute the generated Python metric script on a validation machine.
+
+    This verifies the exact script body and parser that will be saved under
+    new-metrics/. Hermes invokes only this deterministic Python orchestrator;
+    this function owns the SSH execution needed for target-machine validation.
+    """
+    ssh_cmd = [
+        "ssh",
+        "-i", machine["ssh_key"],
+        "-p", str(machine["port"]),
+        "-o", "StrictHostKeyChecking=no",
+        "-o", "BatchMode=yes",
+        "-o", "ConnectTimeout=10",
+        f"{machine['user']}@{machine['host']}",
+        "python3 -",
+    ]
+
+    try:
+        proc = subprocess.run(
+            ssh_cmd,
+            input=script_path.read_text(),
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired:
+        raise RuntimeError("Generated metric script validation timed out")
+    except Exception as e:
+        raise RuntimeError(f"Generated metric script validation failed to run: {e}")
+
+    raw_stdout = (proc.stdout or "").strip()
+    raw_stderr = (proc.stderr or "").strip()
+
+    if proc.returncode != 0:
+        detail = raw_stderr or raw_stdout or f"exit code {proc.returncode}"
+        raise RuntimeError(
+            f"Generated metric script failed on {machine['alias']}: {detail[:500]}"
+        )
+
+    try:
+        payload = json.loads(raw_stdout)
+    except json.JSONDecodeError as e:
+        raise RuntimeError(
+            f"Generated metric script did not print valid JSON on {machine['alias']}: "
+            f"{raw_stdout[:500]} ({e})"
+        )
+
+    if not isinstance(payload, dict):
+        raise RuntimeError(
+            f"Generated metric script returned non-object JSON on {machine['alias']}"
+        )
+
+    missing = {"status", "value", "raw_output"} - set(payload)
+    if missing:
+        raise RuntimeError(
+            f"Generated metric script JSON is missing required field(s) on "
+            f"{machine['alias']}: {', '.join(sorted(missing))}"
+        )
+
+    if payload.get("status") != "ok":
+        raise RuntimeError(
+            f"Generated metric script returned status={payload.get('status')!r} on "
+            f"{machine['alias']}: {str(payload.get('raw_output', ''))[:500]}"
+        )
+
+    value = payload.get("value")
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        raise RuntimeError(
+            f"Generated metric script returned non-numeric value on {machine['alias']}: "
+            f"{value!r}"
+        )
+    validate_metric_value(metric_key, meta, value, payload.get("raw_output", ""))
+
+    return {
+        "status": "ok",
+        "machine": machine["alias"],
+        "value": value,
+        "raw_output": str(payload.get("raw_output", ""))[:500],
+    }
+
+
 def write_metric_script(metric_key, meta):
     """
-    Create a small standalone plugin script in new-metrics/<key>.py.
+    Create a pending standalone plugin script for new-metrics/<key>.py.
 
     The script includes both METADATA (the METRIC dict) and a collect()
     function that executes the shell command and returns
     {"value": <number>, "status": "ok", "raw_output": "..."}.
+    The caller must validate the pending script before committing it.
     """
     NEW_METRICS_DIR.mkdir(parents=True, exist_ok=True)
     script_path = NEW_METRICS_DIR / f"{metric_key}.py"
@@ -321,6 +481,11 @@ if __name__ == "__main__":
         pending_path.unlink(missing_ok=True)
         raise RuntimeError(f"Generated script has a syntax error: {e}")
 
+    return pending_path, script_path
+
+
+def commit_metric_script(pending_path, script_path):
+    """Atomically move a validated pending metric script into place."""
     pending_path.replace(script_path)
     script_path.chmod(0o755)
     return script_path
@@ -331,52 +496,43 @@ if __name__ == "__main__":
 # ---------------------------------------------------------------------------
 
 
-def _yaml_escape(value):
-    """Escape a string for safe embedding in YAML."""
-    if value is None:
-        return "null"
-    s = str(value)
-    # If the value contains special YAML chars, wrap in double quotes
-    # and escape internal backslashes, quotes, and newlines.
-    if any(c in s for c in ('"', "'", ":", "#", "{", "}", "[", "]", ",")):
-        escaped = s.replace("\\", "\\\\").replace('"', '\\"')
-        return f'"{escaped}"'
-    return s
-
-
 def update_registry(metric_key, meta, script_path):
-    """Append the new metric entry to metric_registry.yaml if not already present."""
+    """Add the new metric entry to metric_registry.yaml if not already present."""
+    if yaml is None:
+        raise RuntimeError("PyYAML is not installed; cannot update metric_registry.yaml safely")
+
     REGISTRY_FILE.parent.mkdir(parents=True, exist_ok=True)
 
-    if not REGISTRY_FILE.exists() or REGISTRY_FILE.read_text().strip() == "":
-        REGISTRY_FILE.write_text("metrics:\n")
+    if REGISTRY_FILE.exists() and REGISTRY_FILE.read_text().strip():
+        registry = yaml.safe_load(REGISTRY_FILE.read_text()) or {}
+    else:
+        registry = {}
+    if not isinstance(registry, dict):
+        raise RuntimeError("metric_registry.yaml must contain a YAML mapping")
 
-    existing = REGISTRY_FILE.read_text()
-    marker = f"  {metric_key}:"
-    if marker in existing:
+    metrics = registry.setdefault("metrics", {})
+    if not isinstance(metrics, dict):
+        raise RuntimeError("metric_registry.yaml field 'metrics' must be a mapping")
+    if metric_key in metrics:
         return
 
     rel_script = script_path.relative_to(ROOT)
-    command_str = _yaml_escape(meta["command"])
-    display_name_str = _yaml_escape(meta["display_name"])
-    unit_str = _yaml_escape(meta.get("unit", ""))
-    db_type_str = _yaml_escape(meta.get("db_type", "DOUBLE PRECISION"))
+    metrics[metric_key] = {
+        "display_name": meta["display_name"],
+        "column_name": metric_key,
+        "db_type": meta.get("db_type", "DOUBLE PRECISION"),
+        "unit": meta.get("unit", ""),
+        "script": str(rel_script),
+        "command": meta["command"],
+        "parser": "first_float",
+        "timeout_seconds": 15,
+        "enabled": True,
+    }
 
-    block = (
-        f"\n  {metric_key}:\n"
-        f"    display_name: {display_name_str}\n"
-        f"    column_name: \"{metric_key}\"\n"
-        f"    db_type: \"{meta.get('db_type', 'DOUBLE PRECISION')}\"\n"
-        f"    unit: {unit_str}\n"
-        f"    script: \"{rel_script}\"\n"
-        f"    command: {command_str}\n"
-        f"    parser: \"first_float\"\n"
-        f"    timeout_seconds: 15\n"
-        f"    enabled: true\n"
+    REGISTRY_FILE.write_text(
+        yaml.safe_dump(registry, sort_keys=False, default_flow_style=False),
+        encoding="utf-8",
     )
-
-    with REGISTRY_FILE.open("a") as f:
-        f.write(block)
 
 
 # ---------------------------------------------------------------------------
@@ -473,13 +629,19 @@ def main():
         help="Unit of measurement (e.g. 'count', '%', 'ms')."
     )
     args = parser.parse_args()
+    conn = None
+    stage = "resolve"
 
     try:
         metric_key, meta = resolve_metric_from_cli(
             args.metric, args.command, args.display_name, args.db_type, args.unit
         )
+        stage = "command_definition"
+        validate_command_definition(metric_key, meta)
 
+        stage = "db_connect"
         conn = db_connect()
+        stage = "load_machines"
         machines = get_all_machines_from_db(conn)
 
         if not machines:
@@ -488,14 +650,33 @@ def main():
                 "Cannot validate the command. Register a machine first."
             )
 
-        # Try all machines, succeed on first working one
-        validation = validate_command_on_machines(metric_key, meta["command"], machines)
+        # Try all machines, succeed on first working one.
+        stage = "command_validation"
+        validation = validate_command_on_machines(metric_key, meta, machines)
 
-        script_path = write_metric_script(metric_key, meta)
+        stage = "script_generation"
+        pending_path, script_path = write_metric_script(metric_key, meta)
+        try:
+            stage = "generated_script_validation"
+            generated_validation = validate_generated_script_on_machine(
+                pending_path,
+                validation["machine_config"],
+                metric_key,
+                meta,
+            )
+        except Exception:
+            pending_path.unlink(missing_ok=True)
+            raise
+
+        stage = "script_commit"
+        script_path = commit_metric_script(pending_path, script_path)
+        stage = "registry_update"
         update_registry(metric_key, meta, script_path)
+        stage = "db_schema_update"
         ensure_db_column(conn, metric_key, meta.get("db_type", "DOUBLE PRECISION"))
 
         conn.close()
+        conn = None
 
         print(json.dumps({
             "status": "ok",
@@ -505,13 +686,21 @@ def main():
             "registry": str(REGISTRY_FILE),
             "db_column": metric_key,
             "validated_on": validation["machine"],
+            "validated_host": validation["host"],
+            "validated_host_source": validation["host_source"],
             "validated_value": validation["value"],
             "raw_output": validation["raw_output"],
+            "generated_script_validated_on": generated_validation["machine"],
+            "generated_script_value": generated_validation["value"],
+            "generated_script_raw_output": generated_validation["raw_output"],
         }, indent=2))
 
     except Exception as e:
-        print(json.dumps({"status": "error", "error": str(e)}, indent=2))
+        print(json.dumps({"status": "error", "stage": stage, "error": str(e)}, indent=2))
         sys.exit(1)
+    finally:
+        if conn is not None:
+            conn.close()
 
 
 if __name__ == "__main__":

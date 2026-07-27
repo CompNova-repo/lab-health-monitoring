@@ -1371,7 +1371,7 @@ def db_ensure_machine(conn, alias, inventory):
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (alias) DO UPDATE SET
                 hostname = COALESCE(EXCLUDED.hostname, machines.hostname),
-                ip_address = COALESCE(EXCLUDED.ip_address, machines.ip_address),
+                ip_address = machines.ip_address,
                 os_name = COALESCE(EXCLUDED.os_name, machines.os_name),
                 os_version = COALESCE(EXCLUDED.os_version, machines.os_version),
                 cpu_model = COALESCE(EXCLUDED.cpu_model, machines.cpu_model),
