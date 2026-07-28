@@ -35,7 +35,7 @@ metrics:
     db_type: DOUBLE PRECISION
     unit: '%'
     script: new-metrics/cpu_i_o_wait_percentage.py
-    command: top -bn1 | grep 'Cpu(s)' | sed 's/.*, *\([0-9.]*\)% wa.*/\1/'
+    command: top -bn1 | grep -i 'Cpu(s)' | sed -E 's/.*, *([0-9.]+)[ %]wa.*/\1/'
     parser: first_float
     timeout_seconds: 15
     enabled: true
