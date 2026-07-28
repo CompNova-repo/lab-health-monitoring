@@ -1,5 +1,5 @@
 machines:
-  gcp_testing:
+  gcp_14_july:
     thresholds:
       ram: 90
       disk: 85
@@ -8,7 +8,9 @@ machines:
       warning_count: 200
     package_checks:
       - sshd
-    apps: []
+    apps: 
+      - name: postgres
+        pattern: postgresql
     packages:
       - openssh-server
     network_checks:

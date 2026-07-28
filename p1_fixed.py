@@ -145,10 +145,10 @@ REMOTE_TOP_PROCESSES_CMD_TMPL = (
 
 REMOTE_DISKSTATS_CMD_TMPL = (
     "echo '---T0---'; "
-    "awk '$3==\"__DEVICE__\" {print $4,$6,$7,$8,$11,$13}' /proc/diskstats; "
+    "awk '$3==\"__DEVICE__\" {print $4,$8,$13}' /proc/diskstats; "
     "sleep __SLEEP__; "
     "echo '---T1---'; "
-    "awk '$3==\"__DEVICE__\" {print $4,$6,$7,$8,$11,$13}' /proc/diskstats"
+    "awk '$3==\"__DEVICE__\" {print $4,$8,$13}' /proc/diskstats"
 )
 
 REMOTE_NETDEV_CMD_TMPL = (
@@ -485,8 +485,11 @@ def collect_app_metrics(target, apps):
     for app in apps:
         name = app.get("name"); pattern = app.get("pattern")
         if not name or not pattern: continue
+        import base64
+        encoded = base64.b64encode(pattern.encode()).decode()
         remote_cmd = (
-            f"PIDS=$(pgrep -f '{pattern}'); "
+            f"PAT=$(echo '{encoded}' | base64 -d); "
+            f"PIDS=$(pgrep -f \"$PAT\" | grep -v -E \"^($$|$PPID)$\"); "
             "if [ -z \"$PIDS\" ]; then echo 'NOPIDS'; else "
             "echo \"$PIDS\" | tr '\\n' ' '; echo; "
             "ps -o pcpu=,rss=,pmem= -p $(echo \"$PIDS\" | tr '\\n' ',' | sed 's/,$//'); "
@@ -498,7 +501,7 @@ def collect_app_metrics(target, apps):
             results.append({
                 "app_name": name, "cpu_pct": None, "rss_memory_mb": None,
                 "process_count": 0, "thread_count": None, "listening_sockets": None,
-                "status": "stopped" if ok else "error",
+                "status": "not_installed" if ok else "error",
             })
             continue
 
@@ -679,8 +682,8 @@ def collect_disk_io(target, device, sleep_seconds=3):
 
     def parse_sample(line):
         parts = line.split()
-        if len(parts) < 6: return None
-        return {"reads": to_int(parts[0]), "writes": to_int(parts[1]), "sectors_written": to_int(parts[2]), "ms_writing": to_int(parts[3]), "ms_doing_io": to_int(parts[4]), "ms_doing_io_weighted": to_int(parts[5])}
+        if len(parts) < 3: return None
+        return {"reads": to_int(parts[0]), "writes": to_int(parts[1]), "ms_doing_io": to_int(parts[2])}
 
     t0 = parse_sample(sec["T0"][0]); t1 = parse_sample(sec["T1"][0])
     if t0 is None or t1 is None: return None, f"could not parse /proc/diskstats line for device '{device}'"
@@ -955,7 +958,7 @@ def db_write_events(conn, server_id, alerts):
     if not alerts: return
     with conn.cursor() as cur:
         for a in alerts:
-            severity = "critical" if a.get("consecutive_breaches") else "warning"
+            severity = "warning" if a.get("consecutive_breaches") else "critical"
             cur.execute("INSERT INTO events (server_id, event_type, severity, metric, value, threshold, consecutive_breaches, message) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)", (server_id, "threshold_breach", severity, a.get("metric"), a.get("value") if isinstance(a.get("value"), (int, float)) else None, a.get("threshold") if isinstance(a.get("threshold"), (int, float)) else None, a.get("consecutive_breaches"), a.get("message")))
 
 def db_write_app_metrics(conn, server_id, ts, app_metrics):
@@ -1407,6 +1410,28 @@ def load_machines_from_db():
                     "ssh_key": r["ssh_key_path"],
                 }
 
+        # Merge monitor_config.yaml over DB defaults (apps, thresholds, packages, etc.)
+        try:
+            yaml_cfg, _ = load_monitor_config()
+            for alias, yaml_entry in yaml_cfg.items():
+                if alias in monitor_cfg:
+                    cfg = monitor_cfg[alias]
+                    for key in ("thresholds", "package_checks", "apps", "packages", "network_checks"):
+                        yaml_val = yaml_entry.get(key)
+                        if yaml_val:
+                            if isinstance(cfg.get(key), dict) and isinstance(yaml_val, dict):
+                                cfg[key].update(yaml_val)
+                            elif isinstance(cfg.get(key), list) and isinstance(yaml_val, list):
+                                cfg[key] = list(yaml_val)
+                    if yaml_entry.get("top_n") is not None:
+                        cfg["top_n"] = yaml_entry["top_n"]
+                    if yaml_entry.get("disk_device"):
+                        cfg["disk_device"] = yaml_entry["disk_device"]
+                    if yaml_entry.get("network_interface"):
+                        cfg["network_interface"] = yaml_entry["network_interface"]
+        except Exception as e:
+            sys.stderr.write(f"[p1_helper] Failed to load/merge monitor_config.yaml: {e}\n")
+
         return monitor_cfg, ssh_targets
 
     finally:
@@ -1494,8 +1519,7 @@ def cmd_run(mode):
     print(json.dumps(result, indent=2, default=str))
 
 def cmd_validate(alias):
-    monitor_cfg, _ = load_monitor_config()
-    ssh_targets = load_ssh_targets()
+    monitor_cfg, ssh_targets = load_machines_from_db()
     machine_cfg = monitor_cfg.get(alias); ssh_target = ssh_targets.get(alias)
 
     if not machine_cfg or not ssh_target:
